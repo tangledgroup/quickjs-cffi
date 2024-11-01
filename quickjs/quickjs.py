@@ -1,6 +1,12 @@
+__all__ = ['QuickJSError', 'Runtime', 'Context']
+
 import json
 from typing import Any
 from _quickjs import ffi, lib
+
+
+class QuickJSError(Exception):
+    pass
 
 
 def js_likely(x):
@@ -96,7 +102,8 @@ class Context:
         is_exception: bool = JS_IsException(_val)
 
         if is_exception:
-            raise ValueError(_val.tag)
+            lib.js_std_dump_error(self._ctx)
+            raise QuickJSError(_val.tag)
 
         if _val.tag == lib.JS_TAG_FIRST:
             raise NotImplementedError('JS_TAG_FIRST')
@@ -120,10 +127,11 @@ class Context:
             replacer = self._eval('null')
             space0 = self._eval('null')
             _json_val = lib.JS_JSONStringify(self._ctx, _val, replacer, space0)
-            _c_str = lib._inlined_JS_ToCString(self._ctx, _json_val)
+            _c_str = lib._inlined_JS_ToCString(self._ctx, _json_val) # FIXME: who is owner of this object?
             val = ffi.string(_c_str)
             val = val.decode()
             val = json.loads(val)
+            JS_FreeValue(self._ctx, _json_val)
         elif _val.tag == lib.JS_TAG_INT:
             val = _val.u.int32
         elif _val.tag == lib.JS_TAG_BOOL:
@@ -137,6 +145,7 @@ class Context:
         elif _val.tag == lib.JS_TAG_CATCH_OFFSET:
             raise NotImplementedError('JS_TAG_CATCH_OFFSET')
         elif _val.tag == lib.JS_TAG_EXCEPTION:
+            # lib._eval('console.error(_)')
             raise NotImplementedError('JS_TAG_EXCEPTION')
         elif _val.tag == lib.JS_TAG_FLOAT64:
             val = _val.u.float64
@@ -178,6 +187,9 @@ if __name__ == '__main__':
     print(val, type(val))
 
     val = ctx.eval('var b = [1, 2.0, "3"].map(n => n * 2);')
+    print(val, type(val))
+
+    val = ctx.eval('const a = 10;')
     print(val, type(val))
 
     input()
