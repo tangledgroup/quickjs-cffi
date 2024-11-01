@@ -35,21 +35,18 @@ def js_unlikely(x):
 
 
 def JS_VALUE_GET_TAG(v: 'JSValue') -> int:
-    # return ffi.cast('uintptr_t', v) & 0xf
+    #define JS_VALUE_GET_TAG(v) (int)((uintptr_t)(v) & 0xf)
     return v.tag & 0xf
 
 
 def JS_VALUE_GET_PTR(v: 'JSValue') -> 'void*':
-    # (void *)((intptr_t)(v) & ~0xf)
-    # return ffi.cast('void*', ffi.cast('intptr_t', v) & ~0xf)
-    # (void *)(intptr_t)(v)
-    # return ffi.cast('void*', ffi.cast('intptr_t', v))
+    #define JS_VALUE_GET_PTR(v) (void *)((intptr_t)(v) & ~0xf)
     return v.u.ptr
 
 
 def JS_VALUE_HAS_REF_COUNT(v: 'JSValue') -> bool:
-    return JS_VALUE_GET_TAG(v) >= lib.JS_TAG_FIRST
-
+    #define JS_VALUE_HAS_REF_COUNT(v) ((unsigned)JS_VALUE_GET_TAG(v) >= (unsigned)JS_TAG_FIRST)
+    return ffi.cast('unsigned', JS_VALUE_GET_TAG(v)) >= ffi.cast('unsigned', lib.JS_TAG_FIRST)
 
 
 def JS_FreeValue(ctx: '*JSContext', v: 'JSValue'):
@@ -60,11 +57,11 @@ def JS_FreeValue(ctx: '*JSContext', v: 'JSValue'):
         print(f'{p = }')
         p: '*JSRefCountHeader' = ffi.cast('JSRefCountHeader*', p)
         print(f'{p = }')
-        # print(f'{p = } {p.ref_count = }')
-        # p.ref_count -= 1
+        print(f'{p = } {p.ref_count = }')
+        p.ref_count -= 1
 
-        # if p.ref_count <= 0:
-        #     lib.__JS_FreeValue(ctx, v)
+        if p.ref_count <= 0:
+            lib.__JS_FreeValue(ctx, v)
 
 
 def JS_IsException(v: 'JSValueConst') -> bool:
@@ -78,10 +75,10 @@ class Runtime:
 
 
     def __del__(self):
-        lib.JS_FreeRuntime(self._rt)
-
         for _ctx in self._ctxs:
             lib.JS_FreeContext(_ctx)
+
+        lib.JS_FreeRuntime(self._rt)
 
 
 class Context:

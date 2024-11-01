@@ -16,18 +16,43 @@ from clean import clean
 
 
 def add_prefix_to_function(func_signature: str, prefix: str) -> str:
-    # Regular expression to match function name
-    pattern = r'(\w+)\s*\(([^)]*)\)'
+    # Regular expression pattern to match C function declarations
+    pattern = r"""
+        (\b[\w\s\*\(\)\[\],]*?)         # Match the return type (words, spaces, pointers, arrays, commas)
+        \s*                             # Optional whitespace before the function name
+        (\b\w+\b)                       # Match the function name (capturing group for renaming)
+        \s*                             # Optional whitespace after the function name
+        (\([^)]*?)                      # Match the function parameters (open parentheses but not mandatory closed)
+        (\s*__attribute__\s*\(\(.*?\)\))? # Optionally match __attribute__((...)) syntax
+        \s*                             # Optional whitespace
+        (?=$|;|\n|\))                   # Lookahead for end of line, semicolon, or closing parenthesis
+    """
 
-    # Function to add prefix to the function name
-    def add_prefix(match):
-        func_name = match.group(1)
-        args = match.group(2)
-        return f"{prefix}{func_name}({args})"
+    # Replacement function to add prefix to the function name
+    def replacer(match):
+        return f"{match.group(1)} {prefix}{match.group(2)}{match.group(3)}{match.group(4) or ''}"
 
-    # Use re.sub to replace the function name with the prefixed one
-    new_signature = re.sub(pattern, add_prefix, func_signature)
-    return new_signature
+    # Substitute using the pattern and replacement function
+    return re.sub(pattern, replacer, func_signature, flags=re.VERBOSE)
+
+
+def add_prefix_to_macro(macros):
+    output = []
+
+    for match in macro_pattern.finditer(macros):
+        macro_name = match.group(1)
+        params = match.group(2).strip()
+        expression = match.group(3).strip()
+
+        # Convert macro to function definition
+        function_name = f"__macro_{macro_name}"
+        param_list = ', '.join([f"{param.strip()}" for param in params.split(',')])
+
+        # Formatting the converted function
+        function_def = f"inline int {function_name}({param_list}) {{\n    return {expression};\n}}\n"
+        output.append(function_def)
+
+    return '\n'.join(output)
 
 
 def clone_quickjs_repo():
@@ -43,10 +68,7 @@ def build_quickjs_repo(*args, **kwargs):
     #
     # build llama.cpp
     #
-    # env['CFLAGS'] = '-fPIC'
-    env['CFLAGS'] = '-fPIC -fno-inline'
-    # env['CFLAGS'] = '-fPIC -Djs_force_inline="inline __attribute__((visibility("default")))"'
-    # env['CFLAGS'] = '-fPIC -Dstatic= -Dinline='
+    env['CFLAGS'] = '-fPIC'
     subprocess.run(['make', '-C', 'quickjs-repo', 'qjs'], check=True, env=env)
 
     #
@@ -117,8 +139,10 @@ def build_quickjs_repo(*args, **kwargs):
             scope = line.count('{')
             scope -= line.count('}')
 
-            # line = line[len('static inline '):]
-            # line = add_prefix_to_function(line, '__cffi_')
+            line = line[len('static inline '):]
+            print('! ', line)
+            line = add_prefix_to_function(line, '__inlined_')
+            print('!!', line)
             _inline_static_source.append(line)
             continue
 
@@ -167,8 +191,10 @@ def build_quickjs_repo(*args, **kwargs):
             '../quickjs-repo/.obj/quickjs.o',
             '../quickjs-repo/.obj/repl.o',
         ],
-        extra_compile_args=['-O3', '-fno-inline'],
-        extra_link_args=['-flto', '-fno-inline'],
+        extra_compile_args=['-O3'],
+        # extra_compile_args=['-O3', '-fno-inline', '-fno-common'],
+        extra_link_args=['-flto'],
+        # extra_link_args=['-flto', '-fno-inline', '-fno-common'],
     )
 
     ffibuilder.compile(tmpdir='build', verbose=True)

@@ -164,4 +164,4 @@ cython_debug/
 #.idea/
 
 wheelhouse/
-llama.cpp/
+quickjs-repo/
