@@ -55,6 +55,94 @@ def add_prefix_to_macro(macros):
     return '\n'.join(output)
 
 
+def get_func_declarations(source_code: str) -> list[str]:
+    def remove_comments(code: str) -> str:
+        # Remove multi-line comments
+        code = re.sub(r'/\*[^*]*\*+(?:[^/*][^*]*\*+)*/', '', code)
+        # Remove single-line comments
+        code = re.sub(r'//[^\n]*', '', code)
+        return code
+
+    def find_matching_brace(code: str, start: int) -> int:
+        """Find the matching closing brace considering nested blocks"""
+        count = 1
+        i = start
+
+        while i < len(code) and count > 0:
+            if code[i] == '{':
+                count += 1
+            elif code[i] == '}':
+                count -= 1
+
+            i += 1
+
+        return i - 1 if count == 0 else -1
+
+    def extract_declarations(code: str) -> list[tuple]:
+        results = []
+        i = 0
+
+        while i < len(code):
+            # Find potential function start
+            match = re.search(r'''
+                # Return type
+                (?:(?:static|extern|inline|const|volatile|unsigned|signed|struct|enum|union|long|short)\s+)*
+                [\w_]+                    # Base type
+                (?:\s*\*\s*|\s+)         # Pointers or whitespace
+                (?:const\s+)*            # Optional const after pointer
+                # Function name
+                ([\w_]+)                 # Capture function name
+                \s*
+                # Parameters
+                \(
+                ((?:[^()]*|\([^()]*\))*)  # Parameters allowing one level of nested parentheses
+                \)
+                \s*
+                (?:{|;)                   # Either opening brace or semicolon
+            ''', code[i:], re.VERBOSE)
+
+            if not match:
+                break
+
+            start = i + match.start()
+            end = i + match.end()
+
+            # Get everything before the function name to extract return type
+            func_start = code[i:].find(match.group(1), match.start())
+            return_type = code[i+match.start():i+func_start].strip()
+
+            # If we found an opening brace, find its matching closing brace
+            if code[end-1] == '{':
+                closing_brace = find_matching_brace(code, end)
+
+                if closing_brace == -1:
+                    break
+                # Skip the entire function body
+                i = closing_brace + 1
+            else:
+                i = end
+
+            results.append((return_type, match.group(1), match.group(2)))
+
+        return results
+
+    # Remove comments and normalize whitespace
+    source_code = remove_comments(source_code)
+
+    # Extract declarations
+    declarations = []
+
+    for return_type, func_name, params in extract_declarations(source_code):
+        # Clean up parameters
+        params = re.sub(r'\s+', ' ', params.strip())
+        # Create declaration
+        declaration = f"{return_type} {func_name}({params});"
+        declaration = re.sub(r'\s+', ' ', declaration)
+        declarations.append(declaration)
+
+    return declarations
+
+
 def clone_quickjs_repo():
     subprocess.run(['git', 'clone', 'https://github.com/bellard/quickjs.git', 'quickjs-repo'], check=True)
 
@@ -140,9 +228,9 @@ def build_quickjs_repo(*args, **kwargs):
             scope -= line.count('}')
 
             line = line[len('static inline '):]
-            print('! ', line)
-            line = add_prefix_to_function(line, '__inlined_')
-            print('!!', line)
+            # print('! ', line)
+            line = add_prefix_to_function(line, '_inlined_')
+            # print('!!', line)
             _inline_static_source.append(line)
             continue
 
@@ -169,6 +257,14 @@ def build_quickjs_repo(*args, **kwargs):
     print(_inline_static_source)
     print('='* 80)
 
+    # function declarations for inlined definitions
+    func_declarations: list[str] | str = get_func_declarations(_inline_static_source)
+    func_declarations = '\n'.join(func_declarations)
+    print('-'* 80)
+    print(func_declarations)
+    print('-'* 80)
+    _source += '\n\n' + func_declarations
+
     # print code
     for i, line in enumerate(_source.splitlines()):
         print(i + 1, ':', line)
@@ -192,9 +288,7 @@ def build_quickjs_repo(*args, **kwargs):
             '../quickjs-repo/.obj/repl.o',
         ],
         extra_compile_args=['-O3'],
-        # extra_compile_args=['-O3', '-fno-inline', '-fno-common'],
         extra_link_args=['-flto'],
-        # extra_link_args=['-flto', '-fno-inline', '-fno-common'],
     )
 
     ffibuilder.compile(tmpdir='build', verbose=True)
