@@ -170,3 +170,6 @@ print(val, type(val))
 
 val = ctx.eval('[1, 2.0, "3"]')
 print(val, type(val))
+
+val = ctx.eval('({x: 1, y: 2.0, z: {w: ["3"]}})')
+print(val, type(val))
