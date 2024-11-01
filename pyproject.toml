@@ -1,0 +1,53 @@
+[tool.poetry]
+name = "quickjs-cffi"
+version = "0.1.0"
+description = "Python binding for quickjs using cffi"
+homepage = "https://github.com/tangledgroup/quickjs-cffi"
+repository = "https://github.com/tangledgroup/quickjs-cffi"
+authors = ["Marko Tasic <mtasic85@gmail.com>", "Tangled Group, Inc <info@tangledgroup.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "quickjs"}]
+include = [{path = "quickjs/*.so"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+cffi = "^1.17.1"
+setuptools = "^75.3.0"
+
+[tool.poetry.extras]
+
+[tool.poetry.group.dev.dependencies]
+cibuildwheel = "^2.21.3"
+mkdocs-material = "^9.5.43"
+
+[tool.poetry.scripts]
+build = "scripts.build:build"
+clean = "scripts.clean:clean"
+
+[tool.poetry.build]
+script = "scripts/build.py"
+
+[tool.cibuildwheel]
+
+[tool.cibuildwheel.linux]
+build-frontend = "build"
+before-build = """
+ARCH=$(uname -m)
+pip install poetry
+"""
+skip = ["cp36-*", "cp37-*", "cp38-*", "cp39-*", "pp37-*", "pp38-*", "pp39-*", "*i686"]
+manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64:latest"
+manylinux-aarch64-image = "quay.io/pypa/manylinux_2_28_aarch64:latest"
+manylinux-pypy_x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64:latest"
+manylinux-pypy_aarch64-image = "quay.io/pypa/manylinux_2_28_aarch64:latest"
+musllinux-x86_64-image = "quay.io/pypa/musllinux_1_2_x86_64:latest"
+musllinux-aarch64-image = "quay.io/pypa/musllinux_1_2_aarch64:latest"
+build-verbosity=3
+# repair-wheel-command = ""
+
+[tool.cibuildwheel.pyodide]
+
+[build-system]
+requires = ["poetry-core", "cffi", "setuptools"]
+build-backend = "poetry.core.masonry.api"
