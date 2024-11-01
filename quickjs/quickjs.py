@@ -59,12 +59,14 @@ class Runtime:
     def __init__(self):
         self._rt = lib.JS_NewRuntime()
         self._ctxs = []
+        lib.js_std_init_handlers(self._rt)
 
 
     def __del__(self):
         for _ctx in self._ctxs:
             lib.JS_FreeContext(_ctx)
 
+        lib.js_std_free_handlers(self._rt)
         lib.JS_FreeRuntime(self._rt)
 
 
@@ -147,29 +149,35 @@ class Context:
         return val
 
 
-rt = Runtime()
-ctx = Context(rt)
+if __name__ == '__main__':
+    rt = Runtime()
+    ctx = Context(rt)
 
-val = ctx.eval('var a = 1 + 1;')
-print(val, type(val))
+    val = ctx.eval('var a = 1 + 1;')
+    print(val, type(val))
 
-val = ctx.eval('1 + 1')
-print(val, type(val))
+    val = ctx.eval('1 + 1')
+    print(val, type(val))
 
-val = ctx.eval('1 + 1.1')
-print(val, type(val))
+    val = ctx.eval('1 + 1.1')
+    print(val, type(val))
 
-val = ctx.eval('true')
-print(val, type(val))
+    val = ctx.eval('true')
+    print(val, type(val))
 
-val = ctx.eval('"aaa" + "bbb"')
-print(val, type(val))
+    val = ctx.eval('"aaa" + "bbb"')
+    print(val, type(val))
 
-val = ctx.eval('JSON.stringify([1, 2.0, "3"])')
-print(val, type(val))
+    val = ctx.eval('JSON.stringify([1, 2.0, "3"])')
+    print(val, type(val))
 
-val = ctx.eval('[1, 2.0, "3"]')
-print(val, type(val))
+    val = ctx.eval('[1, 2.0, "3"]')
+    print(val, type(val))
 
-val = ctx.eval('({x: 1, y: 2.0, z: {w: ["3"]}})')
-print(val, type(val))
+    val = ctx.eval('({x: 1, y: 2.0, z: {w: ["3"]}})')
+    print(val, type(val))
+
+    val = ctx.eval('var b = [1, 2.0, "3"].map(n => n * 2);')
+    print(val, type(val))
+
+    input()
