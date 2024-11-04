@@ -67,6 +67,13 @@ class Runtime:
         self.ctxs = []
         lib.js_std_init_handlers(self._rt)
 
+        lib.JS_SetModuleLoaderFunc(
+            self._rt,
+            ffi.cast('JSModuleNormalizeFunc*', 0),
+            lib.js_module_loader,
+            ffi.cast('void*', 0),
+        )
+
 
     def __del__(self):
         for ctx in self.ctxs:
@@ -90,8 +97,19 @@ class Context:
         lib.JS_AddIntrinsicBigDecimal(self._ctx)
         lib.JS_AddIntrinsicOperators(self._ctx)
         lib.JS_EnableBignumExt(self._ctx, True)
+
         lib.js_init_module_std(self._ctx, b'std')
         lib.js_init_module_os(self._ctx, b'os')
+
+
+    def __getitem__(self, key: str) -> Any:
+        val: Any = self.eval(key)
+        return val
+
+
+    def __setitem__(self, key: str, value: Any):
+        json_value: str = json.dumps(value)
+        self.eval(f'var {key} = {json_value};')
 
 
     def _eval(self, buf: str, filename: str='<inupt>', eval_flags: int=0) -> Any:
@@ -124,7 +142,12 @@ class Context:
         elif _val.tag == lib.JS_TAG_BIG_FLOAT:
             raise NotImplementedError('JS_TAG_BIG_FLOAT')
         elif _val.tag == lib.JS_TAG_SYMBOL:
-            raise NotImplementedError('JS_TAG_SYMBOL')
+            _atom = lib.JS_ValueToAtom(self._ctx, _val)
+            _c_str = lib.JS_AtomToCString(self._ctx, _atom)
+            val = ffi.string(_c_str)
+            val = val.decode()
+            val = f'Symbol({val})'
+            lib.JS_FreeAtom(self._ctx, _atom)
         elif _val.tag == lib.JS_TAG_STRING:
             _c_str = lib._inlined_JS_ToCString(self._ctx, _val)
             val = ffi.string(_c_str)
@@ -159,8 +182,6 @@ class Context:
             raise NotImplementedError('JS_TAG_EXCEPTION')
         elif _val.tag == lib.JS_TAG_FLOAT64:
             val = _val.u.float64
-        elif _val.tag == lib.JS_TAG_FIRST:
-            raise NotImplementedError('JS_TAG_FIRST')
         else:
             raise NotImplementedError('JS_NAN_BOXING')
 
@@ -175,43 +196,74 @@ def demo1():
     val = ctx.eval('2n ** 512n')
     print(val, type(val))
 
-    # val = ctx.eval('var a = 1 + 1;')
-    # print(val, type(val))
+    val = ctx.eval('Symbol("foo bar")')
+    print(val, type(val))
 
-    # val = ctx.eval('1 + 1')
-    # print(val, type(val))
+    val = ctx.eval('var a = 1 + 1;')
+    print(val, type(val))
 
-    # val = ctx.eval('1 + 1.1')
-    # print(val, type(val))
+    val = ctx.eval('1 + 1')
+    print(val, type(val))
 
-    # val = ctx.eval('true || false')
-    # print(val, type(val))
+    val = ctx.eval('1 + 1.1')
+    print(val, type(val))
 
-    # val = ctx.eval('"aaa" + "bbb"')
-    # print(val, type(val))
+    val = ctx.eval('true || false')
+    print(val, type(val))
 
-    # val = ctx.eval('JSON.stringify([1, 2.0, "3"])')
-    # print(val, type(val))
+    val = ctx.eval('"aaa" + "bbb"')
+    print(val, type(val))
 
-    # val = ctx.eval('[1, 2.0, "3"]')
-    # print(val, type(val))
+    val = ctx.eval('JSON.stringify([1, 2.0, "3"])')
+    print(val, type(val))
 
-    # val = ctx.eval('({x: 1, y: 2.0, z: {w: ["3"]}})')
-    # print(val, type(val))
+    val = ctx.eval('[1, 2.0, "3"]')
+    print(val, type(val))
 
-    # val = ctx.eval('var b = [1, 2.0, "3"].map(n => n * 2); b')
-    # print(val, type(val))
+    val = ctx.eval('({x: 1, y: 2.0, z: {w: ["3"]}})')
+    print(val, type(val))
 
-    # try:
-    #     val = ctx.eval('const a = 10;')
-    #     print(val, type(val))
-    # except QuickJSError as e:
-    #     print(f'QuickJSError {e = }')
+    val = ctx.eval('var b = [1, 2.0, "3"].map(n => n * 2); b')
+    print(val, type(val))
+
+    try:
+        val = ctx.eval('const a = 10;')
+        print(val, type(val))
+    except QuickJSError as e:
+        print(f'QuickJSError {e = }')
 
     input('Press any key')
 
 
 def demo2():
+    rt = Runtime()
+    ctx: Context = rt.new_context()
+
+    ctx['a'] = 10
+    val = ctx['a']
+    print(val, type(val))
+
+    ctx['b'] = [1, 2.0, '3']
+    ctx.eval('b = b.map(n => n * 2)')
+    val = ctx['b']
+    print(val, type(val))
+
+    # ctx.eval('std.puts("0000")')
+    # ctx.eval('import * as std from "std"; console.log("123");', eval_flags=1)
+    # ctx.eval('std.puts("0111")', eval_flags=1)
+    ctx.eval('import * as std from "std";', eval_flags=1)
+    ctx.eval('import * as os from "os";', eval_flags=1)
+    ctx.eval('export default 1', eval_flags=1)
+
+    # val = ctx.eval('import * as Handlebars from "/home/mtasic/projects-tg/tangledlabs/app/static/js/handlebars.js";', eval_flags=1)
+    # print(val, type(val))
+
+    # ctx.eval('console.log(Handlebars.__esModule);', eval_flags=1)
+    # ctx.eval('os.puts("1");', eval_flags=0)
+    input('Press any key')
+
+
+def demo3():
     from tqdm import tqdm
 
     rt = Runtime()
@@ -224,4 +276,4 @@ def demo2():
 
 
 if __name__ == '__main__':
-    demo1()
+    demo2()

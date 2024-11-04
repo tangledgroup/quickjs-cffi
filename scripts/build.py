@@ -156,7 +156,7 @@ def build_quickjs_repo(*args, **kwargs):
     #
     # build llama.cpp
     #
-    env['CFLAGS'] = '-fPIC'
+    env['CFLAGS'] = '-fPIC -ffunction-sections -fdata-sections'
     subprocess.run(['make', '-C', 'quickjs-repo', 'qjs'], check=True, env=env)
 
     #
@@ -274,8 +274,7 @@ def build_quickjs_repo(*args, **kwargs):
 
     ffibuilder.set_source(
         '_quickjs',
-        '''
-        #include "../_quickjs_lib.h"
+        '''#include "../_quickjs_lib.h"
         ''' + _inline_static_source,
         libraries=['m', 'dl', 'pthread'],
         extra_objects=[
@@ -287,7 +286,7 @@ def build_quickjs_repo(*args, **kwargs):
             '../quickjs-repo/.obj/quickjs.o',
             '../quickjs-repo/.obj/repl.o',
         ],
-        extra_compile_args=['-O3'],
+        extra_compile_args=['-O3', '-fPIC', '-ffunction-sections', '-fdata-sections'],
         extra_link_args=['-flto'],
     )
 
