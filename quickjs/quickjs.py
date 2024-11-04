@@ -43,7 +43,7 @@ def JS_VALUE_HAS_REF_COUNT(v: 'JSValue') -> bool: # noqa
 
 
 def JS_FreeValue(ctx: '*JSContext', v: 'JSValue'): # noqa
-    print(f'{JS_VALUE_HAS_REF_COUNT(v) = }')
+    # print(f'{JS_VALUE_HAS_REF_COUNT(v) = }')
 
     if JS_VALUE_HAS_REF_COUNT(v):
         p: '*void' = JS_VALUE_GET_PTR(v) # noqa
@@ -64,29 +64,34 @@ def JS_IsException(v: 'JSValueConst') -> bool: # noqa
 class Runtime:
     def __init__(self):
         self._rt = lib.JS_NewRuntime()
-        self._ctxs = []
+        self.ctxs = []
         lib.js_std_init_handlers(self._rt)
 
 
     def __del__(self):
-        for _ctx in self._ctxs:
-            lib.JS_FreeContext(_ctx)
+        for ctx in self.ctxs:
+            lib.JS_FreeContext(ctx._ctx)
 
         lib.js_std_free_handlers(self._rt)
         lib.JS_FreeRuntime(self._rt)
+
+
+    def new_context(self) -> 'Context':
+        ctx = Context(self)
+        self.ctxs.append(ctx)
+        return ctx
 
 
 class Context:
     def __init__(self, rt: Runtime):
         self.rt = rt
         self._ctx = lib.JS_NewContext(self.rt._rt)
-        self.rt._ctxs.append(self._ctx)
         lib.JS_AddIntrinsicBigFloat(self._ctx)
         lib.JS_AddIntrinsicBigDecimal(self._ctx)
         lib.JS_AddIntrinsicOperators(self._ctx)
         lib.JS_EnableBignumExt(self._ctx, True)
-        lib.js_init_module_std(self._ctx, b"std")
-        lib.js_init_module_os(self._ctx, b"os")
+        lib.js_init_module_std(self._ctx, b'std')
+        lib.js_init_module_os(self._ctx, b'os')
 
 
     def _eval(self, buf: str, filename: str='<inupt>', eval_flags: int=0) -> Any:
@@ -110,7 +115,12 @@ class Context:
         elif _val.tag == lib.JS_TAG_BIG_DECIMAL:
             raise NotImplementedError('JS_TAG_BIG_DECIMAL')
         elif _val.tag == lib.JS_TAG_BIG_INT:
-            raise NotImplementedError('JS_TAG_BIG_INT')
+            _str = lib.JS_ToString(self._ctx, _val)
+            _c_str = lib._inlined_JS_ToCString(self._ctx, _str)
+            val = ffi.string(_c_str)
+            val = val.decode()
+            val = int(val)
+            JS_FreeValue(self._ctx, _str)
         elif _val.tag == lib.JS_TAG_BIG_FLOAT:
             raise NotImplementedError('JS_TAG_BIG_FLOAT')
         elif _val.tag == lib.JS_TAG_SYMBOL:
@@ -158,38 +168,60 @@ class Context:
         return val
 
 
-if __name__ == '__main__':
+def demo1():
     rt = Runtime()
-    ctx = Context(rt)
+    ctx: Context = rt.new_context()
 
-    val = ctx.eval('var a = 1 + 1;')
+    val = ctx.eval('2n ** 512n')
     print(val, type(val))
 
-    val = ctx.eval('1 + 1')
-    print(val, type(val))
+    # val = ctx.eval('var a = 1 + 1;')
+    # print(val, type(val))
 
-    val = ctx.eval('1 + 1.1')
-    print(val, type(val))
+    # val = ctx.eval('1 + 1')
+    # print(val, type(val))
 
-    val = ctx.eval('true')
-    print(val, type(val))
+    # val = ctx.eval('1 + 1.1')
+    # print(val, type(val))
 
-    val = ctx.eval('"aaa" + "bbb"')
-    print(val, type(val))
+    # val = ctx.eval('true || false')
+    # print(val, type(val))
 
-    val = ctx.eval('JSON.stringify([1, 2.0, "3"])')
-    print(val, type(val))
+    # val = ctx.eval('"aaa" + "bbb"')
+    # print(val, type(val))
 
-    val = ctx.eval('[1, 2.0, "3"]')
-    print(val, type(val))
+    # val = ctx.eval('JSON.stringify([1, 2.0, "3"])')
+    # print(val, type(val))
 
-    val = ctx.eval('({x: 1, y: 2.0, z: {w: ["3"]}})')
-    print(val, type(val))
+    # val = ctx.eval('[1, 2.0, "3"]')
+    # print(val, type(val))
 
-    val = ctx.eval('var b = [1, 2.0, "3"].map(n => n * 2);')
-    print(val, type(val))
+    # val = ctx.eval('({x: 1, y: 2.0, z: {w: ["3"]}})')
+    # print(val, type(val))
 
-    val = ctx.eval('const a = 10;')
-    print(val, type(val))
+    # val = ctx.eval('var b = [1, 2.0, "3"].map(n => n * 2); b')
+    # print(val, type(val))
 
-    input()
+    # try:
+    #     val = ctx.eval('const a = 10;')
+    #     print(val, type(val))
+    # except QuickJSError as e:
+    #     print(f'QuickJSError {e = }')
+
+    input('Press any key')
+
+
+def demo2():
+    from tqdm import tqdm
+
+    rt = Runtime()
+
+    for i in tqdm(range(1_000)):
+        ctx: Context = rt.new_context()
+        val = ctx.eval('var a = 1 + 1;')
+
+    input('Press any key')
+
+
+if __name__ == '__main__':
+    demo1()
