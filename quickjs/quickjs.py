@@ -5,21 +5,64 @@ from typing import Any
 from _quickjs import ffi, lib
 
 
+# /* JS_Eval() flags */
+#define JS_EVAL_TYPE_GLOBAL   (0 << 0) /* global code (default) */
+JS_EVAL_TYPE_GLOBAL = 0 << 0
+#define JS_EVAL_TYPE_MODULE   (1 << 0) /* module code */
+JS_EVAL_TYPE_MODULE = 1 << 0
+#define JS_EVAL_TYPE_DIRECT   (2 << 0) /* direct call (internal use) */
+JS_EVAL_TYPE_DIRECT = 2 << 0
+#define JS_EVAL_TYPE_INDIRECT (3 << 0) /* indirect call (internal use) */
+JS_EVAL_TYPE_INDIRECT = 3 << 0
+#define JS_EVAL_TYPE_MASK     (3 << 0)
+JS_EVAL_TYPE_MASK = 3 << 0
+
+#define JS_EVAL_FLAG_STRICT   (1 << 3) /* force 'strict' mode */
+JS_EVAL_FLAG_STRICT = 1 << 3
+#define JS_EVAL_FLAG_STRIP    (1 << 4) /* force 'strip' mode */
+JS_EVAL_FLAG_STRIP = 1 << 4
+# /* compile but do not run. The result is an object with a
+#    JS_TAG_FUNCTION_BYTECODE or JS_TAG_MODULE tag. It can be executed
+#    with JS_EvalFunction(). */
+#define JS_EVAL_FLAG_COMPILE_ONLY (1 << 5)
+JS_EVAL_FLAG_COMPILE_ONLY = 1 << 5
+# /* don't include the stack frames before this eval in the Error() backtraces */
+#define JS_EVAL_FLAG_BACKTRACE_BARRIER (1 << 6)
+JS_EVAL_FLAG_BACKTRACE_BARRIER = 1 << 6
+# /* allow top-level await in normal script. JS_Eval() returns a
+#    promise. Only allowed with JS_EVAL_TYPE_GLOBAL */
+#define JS_EVAL_FLAG_ASYNC (1 << 7)
+JS_EVAL_FLAG_ASYNC = 1 << 7
+
+
 class QuickJSError(Exception):
     pass
-
-
-def js_likely(x):
-    return x
-
-
-def js_unlikely(x):
-    return x
 
 
 def JS_VALUE_GET_TAG(v: 'JSValue') -> int: # noqa
     #define JS_VALUE_GET_TAG(v) (int)((uintptr_t)(v) & 0xf)
     return v.tag & 0xf
+
+
+def JS_VALUE_GET_NORM_TAG(v: 'JSValue') -> int:
+    # /* same as JS_VALUE_GET_TAG, but return JS_TAG_FLOAT64 with NaN boxing */
+    #define JS_VALUE_GET_NORM_TAG(v) JS_VALUE_GET_TAG(v)
+    return JS_VALUE_GET_TAG(v)
+
+
+def JS_VALUE_GET_INT(v: 'JSValue') -> int:
+    #define JS_VALUE_GET_INT(v) (int)((intptr_t)(v) >> 4)
+    return v.u.int32
+
+
+def JS_VALUE_GET_BOOL(v: 'JSValue') -> bool:
+    #define JS_VALUE_GET_BOOL(v) JS_VALUE_GET_INT(v)
+    return bool(v.u.int32)
+
+
+def JS_VALUE_GET_FLOAT64(v: 'JSValue') -> float:
+    #define JS_VALUE_GET_FLOAT64(v) (double)JS_VALUE_GET_INT(v)
+    return v.u.float64
 
 
 def JS_VALUE_GET_PTR(v: 'JSValue') -> 'void *': # noqa
@@ -42,23 +85,135 @@ def JS_VALUE_HAS_REF_COUNT(v: 'JSValue') -> bool: # noqa
     return abs(JS_VALUE_GET_TAG(v)) >= abs(lib.JS_TAG_FIRST)
 
 
-def JS_FreeValue(ctx: '*JSContext', v: 'JSValue'): # noqa
-    # print(f'{JS_VALUE_HAS_REF_COUNT(v) = }')
-
-    if JS_VALUE_HAS_REF_COUNT(v):
-        p: '*void' = JS_VALUE_GET_PTR(v) # noqa
-        # print(f'{p = }')
-        p: '*JSRefCountHeader' = ffi.cast('JSRefCountHeader*', p) # noqa
-        # print(f'{p = }')
-        # print(f'{p = } {p.ref_count = }')
-        p.ref_count -= 1
-
-        if p.ref_count <= 0:
-            lib.__JS_FreeValue(ctx, v)
+def _JS_Eval(_ctx: 'JSContext*', buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any: # noqa
+    _buf: bytes = buf.encode()
+    _buf_len: int = len(_buf)
+    _filename: bytes = filename.encode()
+    _val: 'JSValue' = lib.JS_Eval(_ctx, _buf, _buf_len, _filename, eval_flags) # noqa
+    return _val
 
 
-def JS_IsException(v: 'JSValueConst') -> bool: # noqa
-    return js_unlikely(v.tag == lib.JS_TAG_EXCEPTION)
+def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # noqa
+    is_exception: bool = lib._inlined_JS_IsException(_val)
+
+    if is_exception:
+        lib.js_std_dump_error(_ctx)
+        raise QuickJSError(_val.tag)
+
+    if _val.tag == lib.JS_TAG_FIRST:
+        raise NotImplementedError('JS_TAG_FIRST')
+    elif _val.tag == lib.JS_TAG_BIG_DECIMAL:
+        raise NotImplementedError('JS_TAG_BIG_DECIMAL')
+    elif _val.tag == lib.JS_TAG_BIG_INT:
+        _str = lib.JS_ToString(_ctx, _val)
+        _c_str = lib._inlined_JS_ToCString(_ctx, _str)
+        val = ffi.string(_c_str)
+        val = val.decode()
+        val = int(val)
+        lib.JS_FreeCString(_ctx, _c_str)
+        lib._inlined_JS_FreeValue(_ctx, _str)
+        lib._inlined_JS_FreeValue(_ctx, _val)
+    elif _val.tag == lib.JS_TAG_BIG_FLOAT:
+        raise NotImplementedError('JS_TAG_BIG_FLOAT')
+    elif _val.tag == lib.JS_TAG_SYMBOL:
+        _atom = lib.JS_ValueToAtom(_ctx, _val)
+        _c_str = lib.JS_AtomToCString(_ctx, _atom)
+        val = ffi.string(_c_str)
+        val = val.decode()
+        val = f'Symbol({val})'
+        lib.JS_FreeAtom(_ctx, _atom)
+        lib.JS_FreeCString(_ctx, _c_str)
+        lib._inlined_JS_FreeValue(_ctx, _val)
+    elif _val.tag == lib.JS_TAG_STRING:
+        _c_str = lib._inlined_JS_ToCString(_ctx, _val)
+        val = ffi.string(_c_str)
+        val = val.decode()
+        lib.JS_FreeCString(_ctx, _c_str)
+        lib._inlined_JS_FreeValue(_ctx, _val)
+    elif _val.tag == lib.JS_TAG_MODULE:
+        raise NotImplementedError('JS_TAG_MODULE')
+    elif _val.tag == lib.JS_TAG_FUNCTION_BYTECODE:
+        raise NotImplementedError('JS_TAG_FUNCTION_BYTECODE')
+    elif _val.tag == lib.JS_TAG_OBJECT:
+        if lib.JS_IsFunction(_ctx, _val):
+            val = JSFunction(_ctx, _val, None)
+        else:
+            _replacer = _JS_Eval(_ctx, 'null')
+            _space0 = _JS_Eval(_ctx, 'null')
+            _json_val = lib.JS_JSONStringify(_ctx, _val, _replacer, _space0)
+            _c_str = lib._inlined_JS_ToCString(_ctx, _json_val)
+            val = ffi.string(_c_str)
+            val = val.decode()
+            val = json.loads(val)
+            lib.JS_FreeCString(_ctx, _c_str)
+            lib._inlined_JS_FreeValue(_ctx, _json_val)
+            lib._inlined_JS_FreeValue(_ctx, _val)
+    elif _val.tag == lib.JS_TAG_INT:
+        val = _val.u.int32
+        lib._inlined_JS_FreeValue(_ctx, _val)
+    elif _val.tag == lib.JS_TAG_BOOL:
+        val = bool(_val.u.int32)
+        lib._inlined_JS_FreeValue(_ctx, _val)
+    elif _val.tag == lib.JS_TAG_NULL:
+        val = None
+        lib._inlined_JS_FreeValue(_ctx, _val)
+    elif _val.tag == lib.JS_TAG_UNDEFINED:
+        val = None
+        lib._inlined_JS_FreeValue(_ctx, _val)
+    elif _val.tag == lib.JS_TAG_UNINITIALIZED:
+        val = None
+        lib._inlined_JS_FreeValue(_ctx, _val)
+    elif _val.tag == lib.JS_TAG_CATCH_OFFSET:
+        raise NotImplementedError('JS_TAG_CATCH_OFFSET')
+    elif _val.tag == lib.JS_TAG_EXCEPTION:
+        # lib._eval('console.error(_)')
+        raise NotImplementedError('JS_TAG_EXCEPTION')
+    elif _val.tag == lib.JS_TAG_FLOAT64:
+        val = _val.u.float64
+        lib._inlined_JS_FreeValue(_ctx, _val)
+    else:
+        lib._inlined_JS_FreeValue(_ctx, _val)
+        raise NotImplementedError('JS_NAN_BOXING')
+
+    return val
+
+
+def convert_pyargs_to_jsargs(_ctx: 'JSContext*', pyargs: list[Any]) -> ('JSValue', 'JSValue'): # noqa
+    _filename: 'char*' = ffi.cast('char*', 0)
+    _val_length = lib._inlined_JS_NewInt32(_ctx, len(pyargs))
+    _val = [json.dumps(n).encode() for n in pyargs]
+    _val = [lib.JS_ParseJSON(_ctx, n, len(n), _filename) for n in _val]
+    _val = ffi.new('JSValue[]', _val)
+    return _val_length, _val
+
+
+class JSFunction:
+    def __init__(self, _ctx: 'JSContext*', _func: 'JSValue'=None, _this: 'JSValue'=None): # noqa
+        self._ctx = _ctx
+        self._func = _func
+        self._this = _this if _this else lib.JS_GetGlobalObject(_ctx)
+
+
+    def __call__(self, *pyargs) -> Any:
+        _ctx = self._ctx
+        _func = self._func
+        _this = self._this
+
+        _jsargs_len, _jsargs = convert_pyargs_to_jsargs(_ctx, pyargs)
+        jsargs_len = JS_VALUE_GET_INT(_jsargs_len)
+
+        _val = lib.JS_Call(_ctx, _func, _this, jsargs_len, _jsargs)
+        val = convert_jsvalue_to_pyvalue(_ctx, _val)
+        ffi.release(_jsargs)
+        return val
+
+
+    def free(self):
+        _ctx = self._ctx
+        _func = self._func
+        _this = self._this
+        lib._inlined_JS_FreeValue(_ctx, _func)
+        lib._inlined_JS_FreeValue(_ctx, _this)
 
 
 class Runtime:
@@ -77,8 +232,9 @@ class Runtime:
 
     def __del__(self):
         for ctx in self.ctxs:
-            lib.JS_FreeContext(ctx._ctx)
+            ctx.free()
 
+        self.ctxs = None
         lib.js_std_free_handlers(self._rt)
         lib.JS_FreeRuntime(self._rt)
 
@@ -92,19 +248,19 @@ class Runtime:
 class Context:
     def __init__(self, rt: Runtime):
         self.rt = rt
-        self._ctx = lib.JS_NewContext(self.rt._rt)
-        lib.JS_AddIntrinsicBigFloat(self._ctx)
-        lib.JS_AddIntrinsicBigDecimal(self._ctx)
-        lib.JS_AddIntrinsicOperators(self._ctx)
-        lib.JS_EnableBignumExt(self._ctx, True)
+        self._ctx = _ctx = lib.JS_NewContext(self.rt._rt)
+        lib.JS_AddIntrinsicBigFloat(_ctx)
+        lib.JS_AddIntrinsicBigDecimal(_ctx)
+        lib.JS_AddIntrinsicOperators(_ctx)
+        lib.JS_EnableBignumExt(_ctx, True)
+        lib.js_init_module_std(_ctx, b'std')
+        lib.js_init_module_os(_ctx, b'os')
 
-        lib.js_init_module_std(self._ctx, b'std')
-        lib.js_init_module_os(self._ctx, b'os')
+        self.js_functions = []
 
 
     def __getitem__(self, key: str) -> Any:
-        val: Any = self.eval(key)
-        return val
+        return self.get(key)
 
 
     def __setitem__(self, key: str, value: Any):
@@ -112,80 +268,29 @@ class Context:
         self.eval(f'var {key} = {json_value};')
 
 
-    def _eval(self, buf: str, filename: str='<inupt>', eval_flags: int=0) -> Any:
-        _buf: bytes = buf.encode()
-        _buf_len: int = len(_buf)
-        _filename: bytes = filename.encode()
-        _val: 'JSValue' = lib.JS_Eval(self._ctx, _buf, _buf_len, _filename, eval_flags) # noqa
-        return _val
+    def free(self):
+        _ctx = self._ctx
+
+        for jsfunc in self.js_functions:
+            jsfunc.free()
+
+        self.js_functions = None
+        lib.JS_FreeContext(_ctx)
 
 
-    def eval(self, buf: str, filename: str='<inupt>', eval_flags: int=0) -> Any:
-        _val: 'JSValue' = self._eval(buf, filename, eval_flags) # noqa
-        is_exception: bool = JS_IsException(_val)
+    def get(self, key: str, eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
+        val: Any = self.eval(key, eval_flags=eval_flags)
 
-        if is_exception:
-            lib.js_std_dump_error(self._ctx)
-            raise QuickJSError(_val.tag)
+        if isinstance(val, JSFunction):
+            self.js_functions.append(val)
 
-        if _val.tag == lib.JS_TAG_FIRST:
-            raise NotImplementedError('JS_TAG_FIRST')
-        elif _val.tag == lib.JS_TAG_BIG_DECIMAL:
-            raise NotImplementedError('JS_TAG_BIG_DECIMAL')
-        elif _val.tag == lib.JS_TAG_BIG_INT:
-            _str = lib.JS_ToString(self._ctx, _val)
-            _c_str = lib._inlined_JS_ToCString(self._ctx, _str)
-            val = ffi.string(_c_str)
-            val = val.decode()
-            val = int(val)
-            JS_FreeValue(self._ctx, _str)
-        elif _val.tag == lib.JS_TAG_BIG_FLOAT:
-            raise NotImplementedError('JS_TAG_BIG_FLOAT')
-        elif _val.tag == lib.JS_TAG_SYMBOL:
-            _atom = lib.JS_ValueToAtom(self._ctx, _val)
-            _c_str = lib.JS_AtomToCString(self._ctx, _atom)
-            val = ffi.string(_c_str)
-            val = val.decode()
-            val = f'Symbol({val})'
-            lib.JS_FreeAtom(self._ctx, _atom)
-        elif _val.tag == lib.JS_TAG_STRING:
-            _c_str = lib._inlined_JS_ToCString(self._ctx, _val)
-            val = ffi.string(_c_str)
-            val = val.decode()
-        elif _val.tag == lib.JS_TAG_MODULE:
-            raise NotImplementedError('JS_TAG_MODULE')
-        elif _val.tag == lib.JS_TAG_FUNCTION_BYTECODE:
-            raise NotImplementedError('JS_TAG_FUNCTION_BYTECODE')
-        elif _val.tag == lib.JS_TAG_OBJECT:
-            replacer = self._eval('null')
-            space0 = self._eval('null')
-            _json_val = lib.JS_JSONStringify(self._ctx, _val, replacer, space0)
-            _c_str = lib._inlined_JS_ToCString(self._ctx, _json_val) # FIXME: who is owner of this object?
-            val = ffi.string(_c_str)
-            val = val.decode()
-            val = json.loads(val)
-            JS_FreeValue(self._ctx, _json_val)
-        elif _val.tag == lib.JS_TAG_INT:
-            val = _val.u.int32
-        elif _val.tag == lib.JS_TAG_BOOL:
-            val = bool(_val.u.int32)
-        elif _val.tag == lib.JS_TAG_NULL:
-            val = None
-        elif _val.tag == lib.JS_TAG_UNDEFINED:
-            val = None
-        elif _val.tag == lib.JS_TAG_UNINITIALIZED:
-            val = None
-        elif _val.tag == lib.JS_TAG_CATCH_OFFSET:
-            raise NotImplementedError('JS_TAG_CATCH_OFFSET')
-        elif _val.tag == lib.JS_TAG_EXCEPTION:
-            # lib._eval('console.error(_)')
-            raise NotImplementedError('JS_TAG_EXCEPTION')
-        elif _val.tag == lib.JS_TAG_FLOAT64:
-            val = _val.u.float64
-        else:
-            raise NotImplementedError('JS_NAN_BOXING')
+        return val
 
-        JS_FreeValue(self._ctx, _val)
+
+    def eval(self, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
+        _ctx = self._ctx
+        _val: 'JSValue' = _JS_Eval(_ctx, buf, filename, eval_flags) # noqa
+        val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
         return val
 
 
@@ -239,6 +344,15 @@ def demo2():
     rt = Runtime()
     ctx: Context = rt.new_context()
 
+    ctx.eval('''
+        import * as std from 'std';
+        import * as os from 'os';
+        globalThis.std = std;
+        globalThis.os = os;
+    ''', eval_flags=JS_EVAL_TYPE_MODULE)
+
+    ctx.eval(r'std.puts("AAA\n");')
+
     ctx['a'] = 10
     val = ctx['a']
     print(val, type(val))
@@ -248,22 +362,48 @@ def demo2():
     val = ctx['b']
     print(val, type(val))
 
-    # ctx.eval('std.puts("0000")')
-    # ctx.eval('import * as std from "std"; console.log("123");', eval_flags=1)
-    # ctx.eval('std.puts("0111")', eval_flags=1)
-    ctx.eval('import * as std from "std";', eval_flags=1)
-    ctx.eval('import * as os from "os";', eval_flags=1)
-    ctx.eval('export default 1', eval_flags=1)
-
-    # val = ctx.eval('import * as Handlebars from "/home/mtasic/projects-tg/tangledlabs/app/static/js/handlebars.js";', eval_flags=1)
-    # print(val, type(val))
-
-    # ctx.eval('console.log(Handlebars.__esModule);', eval_flags=1)
-    # ctx.eval('os.puts("1");', eval_flags=0)
     input('Press any key')
 
 
 def demo3():
+    rt = Runtime()
+    ctx: Context = rt.new_context()
+
+    ctx.eval('''
+        import * as std from 'std';
+        import * as os from 'os';
+        globalThis.std = std;
+        globalThis.os = os;
+
+        function g(x, y, z) {
+            return x * y * z;
+        }
+
+        globalThis.g = g;
+    ''', eval_flags=JS_EVAL_TYPE_MODULE)
+
+    ctx.eval('''
+        function f(x, y, z) {
+            return x * y * z;
+        }
+    ''')
+
+    f = ctx['f']
+    print(f, type(f))
+
+    r = f(2, 3, 4)
+    print(r, type(r))
+
+    g = ctx.get('g')
+    print(f, type(f))
+
+    r = g(20, 30, 40)
+    print(r, type(r))
+
+    input('Press any key')
+
+
+def demo4():
     from tqdm import tqdm
 
     rt = Runtime()
