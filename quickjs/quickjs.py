@@ -85,6 +85,10 @@ def JS_VALUE_HAS_REF_COUNT(v: 'JSValue') -> bool: # noqa
     return abs(JS_VALUE_GET_TAG(v)) >= abs(lib.JS_TAG_FIRST)
 
 
+def _JS_FreeValue(_ctx: 'JSContext*', _val: 'JSValue'): # noqa
+    lib._inlined_JS_FreeValue(_ctx, _val)
+
+
 def _JS_Eval(_ctx: 'JSContext*', buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any: # noqa
     _buf: bytes = buf.encode()
     _buf_len: int = len(_buf)
@@ -98,6 +102,7 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
 
     if is_exception:
         lib.js_std_dump_error(_ctx)
+        _JS_FreeValue(_ctx, _val)
         raise QuickJSError(_val.tag)
 
     if _val.tag == lib.JS_TAG_FIRST:
@@ -111,8 +116,8 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
         val = val.decode()
         val = int(val)
         lib.JS_FreeCString(_ctx, _c_str)
-        lib._inlined_JS_FreeValue(_ctx, _str)
-        lib._inlined_JS_FreeValue(_ctx, _val)
+        _JS_FreeValue(_ctx, _str)
+        _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_BIG_FLOAT:
         raise NotImplementedError('JS_TAG_BIG_FLOAT')
     elif _val.tag == lib.JS_TAG_SYMBOL:
@@ -123,13 +128,13 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
         val = f'Symbol({val})'
         lib.JS_FreeAtom(_ctx, _atom)
         lib.JS_FreeCString(_ctx, _c_str)
-        lib._inlined_JS_FreeValue(_ctx, _val)
+        _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_STRING:
         _c_str = lib._inlined_JS_ToCString(_ctx, _val)
         val = ffi.string(_c_str)
         val = val.decode()
         lib.JS_FreeCString(_ctx, _c_str)
-        lib._inlined_JS_FreeValue(_ctx, _val)
+        _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_MODULE:
         raise NotImplementedError('JS_TAG_MODULE')
     elif _val.tag == lib.JS_TAG_FUNCTION_BYTECODE:
@@ -146,33 +151,32 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
             val = val.decode()
             val = json.loads(val)
             lib.JS_FreeCString(_ctx, _c_str)
-            lib._inlined_JS_FreeValue(_ctx, _json_val)
-            lib._inlined_JS_FreeValue(_ctx, _val)
+            _JS_FreeValue(_ctx, _json_val)
+            _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_INT:
-        val = _val.u.int32
-        lib._inlined_JS_FreeValue(_ctx, _val)
+        val = JS_VALUE_GET_INT(_val)
+        _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_BOOL:
-        val = bool(_val.u.int32)
-        lib._inlined_JS_FreeValue(_ctx, _val)
+        val = JS_VALUE_GET_BOOL(_val)
+        _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_NULL:
         val = None
-        lib._inlined_JS_FreeValue(_ctx, _val)
+        _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_UNDEFINED:
-        val = None
-        lib._inlined_JS_FreeValue(_ctx, _val)
+        val = None # FIXME: use special value
+        _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_UNINITIALIZED:
-        val = None
-        lib._inlined_JS_FreeValue(_ctx, _val)
+        raise NotImplementedError('JS_TAG_CATCH_OFFSET')
     elif _val.tag == lib.JS_TAG_CATCH_OFFSET:
         raise NotImplementedError('JS_TAG_CATCH_OFFSET')
     elif _val.tag == lib.JS_TAG_EXCEPTION:
-        # lib._eval('console.error(_)')
+        # FIXME: handle exception
         raise NotImplementedError('JS_TAG_EXCEPTION')
     elif _val.tag == lib.JS_TAG_FLOAT64:
-        val = _val.u.float64
-        lib._inlined_JS_FreeValue(_ctx, _val)
+        val = JS_VALUE_GET_FLOAT64(_val)
+        _JS_FreeValue(_ctx, _val)
     else:
-        lib._inlined_JS_FreeValue(_ctx, _val)
+        _JS_FreeValue(_ctx, _val)
         raise NotImplementedError('JS_NAN_BOXING')
 
     return val
@@ -185,6 +189,61 @@ def convert_pyargs_to_jsargs(_ctx: 'JSContext*', pyargs: list[Any]) -> ('JSValue
     _val = [lib.JS_ParseJSON(_ctx, n, len(n), _filename) for n in _val]
     _val = ffi.new('JSValue[]', _val)
     return _val_length, _val
+
+
+def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue':
+    if val is None:
+        _val = _JS_Eval(_ctx, 'null')
+    elif isinstance(val, bool):
+        _val = _JS_Eval(_ctx, json.dumps(val))
+    elif isinstance(val, int):
+        _val = _JS_Eval(_ctx, json.dumps(val))
+    elif isinstance(val, float):
+        _val = _JS_Eval(_ctx, json.dumps(val))
+    elif isinstance(val, str):
+        _val = _JS_Eval(_ctx, json.dumps(val))
+    elif isinstance(val, list):
+        _val = lib.JS_NewArray(_ctx)
+        _Array_push_atom = lib.JS_NewAtom(_ctx, b'push')
+
+        for n in val:
+            _n: 'JSValue' = convert_pyvalue_to_jsvalue(_ctx, n)
+            _n_p: 'JSValue*' = ffi.new('JSValue[]', [_n])
+
+            lib.JS_Invoke(_ctx, _val, _Array_push_atom, 1, _n_p)
+
+            ffi.release(_n_p)
+            _JS_FreeValue(_ctx, _n)
+
+        lib.JS_FreeAtom(_ctx, _Array_push_atom)
+    elif isinstance(val, dict):
+        _val = lib.JS_NewObject(_ctx)
+
+        for k, v in val.items():
+            assert isinstance(k, str)
+            _k: bytes = k.encode()
+            _v: 'JSValue' = convert_pyvalue_to_jsvalue(_ctx, v)
+
+            lib.JS_SetPropertyStr(_ctx, _val, _k, _v)
+
+            # NOTE: line below is not required based on JS_SetPropertyStr logic
+            # _JS_FreeValue(_ctx, _v)
+    else:
+        raise ValueError(f'Unsupported Python value {type(val)}')
+
+    return _val
+
+
+class JSValue:
+    def __init__(self, _ctx: 'JSContext*', _val: 'JSValue'=None): # noqa
+        self._ctx = _ctx
+        self._val = _val
+
+
+    def free(self):
+        _ctx = self._ctx
+        _val = self._val
+        _JS_FreeValue(_ctx, _val)
 
 
 class JSFunction:
@@ -212,8 +271,8 @@ class JSFunction:
         _ctx = self._ctx
         _func = self._func
         _this = self._this
-        lib._inlined_JS_FreeValue(_ctx, _func)
-        lib._inlined_JS_FreeValue(_ctx, _this)
+        _JS_FreeValue(_ctx, _func)
+        _JS_FreeValue(_ctx, _this)
 
 
 class Runtime:
@@ -249,6 +308,7 @@ class Context:
     def __init__(self, rt: Runtime):
         self.rt = rt
         self._ctx = _ctx = lib.JS_NewContext(self.rt._rt)
+        self.js_values = []
         lib.JS_AddIntrinsicBigFloat(_ctx)
         lib.JS_AddIntrinsicBigDecimal(_ctx)
         lib.JS_AddIntrinsicOperators(_ctx)
@@ -256,35 +316,43 @@ class Context:
         lib.js_init_module_std(_ctx, b'std')
         lib.js_init_module_os(_ctx, b'os')
 
-        self.js_functions = []
-
 
     def __getitem__(self, key: str) -> Any:
         return self.get(key)
 
 
     def __setitem__(self, key: str, value: Any):
-        json_value: str = json.dumps(value)
-        self.eval(f'var {key} = {json_value};')
+        self.set(key, value)
 
 
     def free(self):
         _ctx = self._ctx
 
-        for jsfunc in self.js_functions:
-            jsfunc.free()
+        for js_val in self.js_values:
+            js_val.free()
 
-        self.js_functions = None
+        self.js_values = None
+        self._ctx = None
         lib.JS_FreeContext(_ctx)
 
 
     def get(self, key: str, eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
-        val: Any = self.eval(key, eval_flags=eval_flags)
+        _ctx = self._ctx
+        _global_this: 'JSValue' = lib.JS_GetGlobalObject(_ctx)
+        _key = key.encode()
+        _value = lib.JS_GetPropertyStr(_ctx, _global_this, _key)
+        value = convert_jsvalue_to_pyvalue(_ctx, _value)
+        _JS_FreeValue(_ctx, _global_this)
+        return value
 
-        if isinstance(val, JSFunction):
-            self.js_functions.append(val)
 
-        return val
+    def set(self, key: str, value: Any, eval_flags: int=JS_EVAL_TYPE_GLOBAL):
+        _ctx = self._ctx
+        _global_this: 'JSValue' = lib.JS_GetGlobalObject(_ctx)
+        _key = key.encode()
+        _value = convert_pyvalue_to_jsvalue(_ctx, value)
+        lib.JS_SetPropertyStr(_ctx, _global_this, _key, _value)
+        _JS_FreeValue(_ctx, _global_this)
 
 
     def eval(self, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
@@ -353,13 +421,37 @@ def demo2():
 
     ctx.eval(r'std.puts("AAA\n");')
 
-    ctx['a'] = 10
-    val = ctx['a']
+    # ctx['a0'] = None
+    # val = ctx['a0']
+    # print(val, type(val))
+
+    # ctx['a1'] = True
+    # val = ctx['a1']
+    # print(val, type(val))
+
+    # ctx['a2'] = 10
+    # val = ctx['a2']
+    # print(val, type(val))
+
+    # ctx['a3'] = 123.45
+    # val = ctx['a3']
+    # print(val, type(val))
+
+    # ctx['a4'] = 'Hello there!'
+    # val = ctx['a4']
+    # print(val, type(val))
+
+    # ctx['b'] = [1, 2.0, '3']
+    # ctx.eval('b = b.map(n => n * 2)')
+    ctx['b'] = [1, 2.0, '3', [1, [2, 3]]]
+    val = ctx['b']
     print(val, type(val))
 
-    ctx['b'] = [1, 2.0, '3']
-    ctx.eval('b = b.map(n => n * 2)')
-    val = ctx['b']
+    ctx['c'] = {'x': 1, 'y': 2, 'w': [1, 2, 3], 'v': {'a': True, 'b': False}}
+    # ctx['c'] = {'x': 1, 'y': 2, 'v': {'a': True, 'b': False}}
+    # ctx['c'] = {'x': 1, 'y': 2, 'w': [1, 2, 3]}
+    # ctx['c'] = {'x': 1, 'y': 2}
+    val = ctx['c']
     print(val, type(val))
 
     input('Press any key')
