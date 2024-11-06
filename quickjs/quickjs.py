@@ -85,6 +85,12 @@ def JS_VALUE_HAS_REF_COUNT(v: 'JSValue') -> bool: # noqa
     return abs(JS_VALUE_GET_TAG(v)) >= abs(lib.JS_TAG_FIRST)
 
 
+def JS_VALUE_GET_REF_COUNT(v: 'JSValue') -> int:
+    _v_p: 'void*' = JS_VALUE_GET_PTR(v)
+    _rfh_p: 'JSRefCountHeader*' = ffi.cast('JSRefCountHeader *', _v_p)
+    return _rfh_p.ref_count
+
+
 def _JS_FreeValue(_ctx: 'JSContext*', _val: 'JSValue'): # noqa
     lib._inlined_JS_FreeValue(_ctx, _val)
 
@@ -117,8 +123,7 @@ def stringify_object(_ctx: 'JSContext*', _obj: 'JSValue') -> str: # noqa
     ffi.release(_jsargs)
     _JS_FreeValue(_ctx, _val)
     _JS_FreeValue(_ctx, _func)
-    # _JS_FreeValue(_ctx, _this)
-    # val = ""
+    _JS_FreeValue(_ctx, _this)
     return val
 
 
@@ -152,33 +157,15 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
         val = ffi.string(_c_str)
         val = val.decode()
         val = f'Symbol({val})'
-        lib.JS_FreeAtom(_ctx, _atom)
         lib.JS_FreeCString(_ctx, _c_str)
+        lib.JS_FreeAtom(_ctx, _atom)
         _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_STRING:
-        _c_str = lib._inlined_JS_ToCString(_ctx, _val)
-        val = ffi.string(_c_str)
-        val = val.decode()
-        lib.JS_FreeCString(_ctx, _c_str)
-        _JS_FreeValue(_ctx, _val)
+        val = QJSString(_ctx, _val)
     elif _val.tag == lib.JS_TAG_MODULE:
         raise NotImplementedError('JS_TAG_MODULE')
     elif _val.tag == lib.JS_TAG_FUNCTION_BYTECODE:
         raise NotImplementedError('JS_TAG_FUNCTION_BYTECODE')
-    # elif _val.tag == lib.JS_TAG_OBJECT:
-    #     if lib.JS_IsFunction(_ctx, _val):
-    #         val = QJSFunction(_ctx, _val, None)
-    #     else:
-    #         _replacer = _JS_Eval(_ctx, 'null')
-    #         _space0 = _JS_Eval(_ctx, 'null')
-    #         _json_val = lib.JS_JSONStringify(_ctx, _val, _replacer, _space0)
-    #         _c_str = lib._inlined_JS_ToCString(_ctx, _json_val)
-    #         val = ffi.string(_c_str)
-    #         val = val.decode()
-    #         val = json.loads(val)
-    #         lib.JS_FreeCString(_ctx, _c_str)
-    #         _JS_FreeValue(_ctx, _json_val)
-    #         _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_OBJECT:
         if lib.JS_IsFunction(_ctx, _val):
             # Function
@@ -189,8 +176,6 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
         else:
             # Object, Map, Set, etc
             val = QJSObject(_ctx, _val)
-
-        _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_INT:
         val = JS_VALUE_GET_INT(_val)
         _JS_FreeValue(_ctx, _val)
@@ -282,32 +267,29 @@ class QJSValue:
         _ctx = self._ctx
         _val = self._val
 
-        _val_address = ffi.addressof(_val)
-        return f'<{self.__class__.__name__} Python at {hex(id(self))} C at {_val_address}>'
+        val: str = stringify_object(_ctx, _val)
+        return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {val}>'
 
 
     def free(self):
         _ctx = self._ctx
         _val = self._val
-        _JS_FreeValue(_ctx, _val)
+        _rt = lib.JS_GetRuntime(_ctx)
+
+        if lib.JS_IsLiveObject(_rt, _val):
+            _JS_FreeValue(_ctx, _val)
+
+
+class QJSString(QJSValue):
+    pass
 
 
 class QJSArray(QJSValue):
-    def __repr__(self) -> str:
-        _ctx = self._ctx
-        _val = self._val
-
-        val: str = stringify_object(_ctx, _val)
-        return f'<{self.__class__.__name__} {val}>'
+    pass
 
 
 class QJSObject(QJSValue):
-    def __repr__(self) -> str:
-        _ctx = self._ctx
-        _val = self._val
-
-        val: str = stringify_object(_ctx, _val)
-        return f'<{self.__class__.__name__} {val}>'
+    pass
 
 
 class QJSFunction(QJSValue):
@@ -353,7 +335,7 @@ class QJSRuntime:
         )
 
 
-    def __del__(self):
+    def free(self):
         for ctx in self.ctxs:
             ctx.free()
 
@@ -431,6 +413,7 @@ class QJSContext:
         '''
 
         _val: 'JSValue' = _JS_Eval(_ctx, code)
+        # print('! QJSContext.__init__', _val, _val.tag, JS_VALUE_GET_REF_COUNT(_val) if JS_VALUE_HAS_REF_COUNT(_val) else None)
         _JS_FreeValue(_ctx, _val)
 
 
@@ -442,10 +425,17 @@ class QJSContext:
         self.set(key, value)
 
 
+    def add_js_value(self, js_value: QJSValue):
+        self.js_values.append(js_value)
+
+
     def free(self):
         _ctx = self._ctx
+        # print(f'{len(self.js_values) = }')
+        # print(f'{self.js_values = }')
 
         for js_val in self.js_values:
+            # print('! free 0', js_val, JS_VALUE_GET_REF_COUNT(js_val._val))
             js_val.free()
 
         self.js_values = None
@@ -453,33 +443,53 @@ class QJSContext:
         lib.JS_FreeContext(_ctx)
 
 
-    def get(self, key: str, eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
+    def get(self, key: str) -> Any:
         _ctx = self._ctx
-        _global_this: 'JSValue' = lib.JS_GetGlobalObject(_ctx) # noqa
+        _this: 'JSValue' = lib.JS_GetGlobalObject(_ctx) # noqa
         _key = key.encode()
-        _value = lib.JS_GetPropertyStr(_ctx, _global_this, _key)
-        value = convert_jsvalue_to_pyvalue(_ctx, _value)
-        _JS_FreeValue(_ctx, _global_this)
 
-        if isinstance(value, QJSValue):
-            self.js_values.append(value)
+        _val = lib.JS_GetPropertyStr(_ctx, _this, _key)
+        # print('! get 0', _val, JS_VALUE_GET_REF_COUNT(_val))
+        val = convert_jsvalue_to_pyvalue(_ctx, _val)
 
-        return value
+        if isinstance(val, QJSValue):
+            self.add_js_value(val)
+        else:
+            _JS_FreeValue(_ctx, _val)
+
+        # print('! get 1', _val, JS_VALUE_GET_REF_COUNT(_val))
+        _JS_FreeValue(_ctx, _this)
+        return val
 
 
-    def set(self, key: str, value: Any, eval_flags: int=JS_EVAL_TYPE_GLOBAL):
+    def set(self, key: str, val: Any):
         _ctx = self._ctx
-        _global_this: 'JSValue' = lib.JS_GetGlobalObject(_ctx) # noqa
+        _this: 'JSValue' = lib.JS_GetGlobalObject(_ctx) # noqa
         _key = key.encode()
-        _value = convert_pyvalue_to_jsvalue(_ctx, value)
-        lib.JS_SetPropertyStr(_ctx, _global_this, _key, _value)
-        _JS_FreeValue(_ctx, _global_this)
+        _val = convert_pyvalue_to_jsvalue(_ctx, val)
+
+        # print('! set 0', _val, JS_VALUE_GET_REF_COUNT(_val))
+        lib.JS_SetPropertyStr(_ctx, _this, _key, _val)
+        # print('! set 1', _val, JS_VALUE_GET_REF_COUNT(_val))
+
+        # NOTE: do not free _val because set does not increase ref count
+        #   _JS_FreeValue(_ctx, _val)
+        _JS_FreeValue(_ctx, _this)
 
 
     def eval(self, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
         _ctx = self._ctx
         _val: 'JSValue' = _JS_Eval(_ctx, buf, filename, eval_flags) # noqa
+        # print('! eval 0', _val, _val.tag, JS_VALUE_GET_REF_COUNT(_val) if JS_VALUE_HAS_REF_COUNT(_val) else None)
         val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
+
+        if isinstance(val, QJSValue):
+            # print('! eval 1', val)
+            self.add_js_value(val)
+        else:
+            _JS_FreeValue(_ctx, _val)
+
+        # print('! eval 2', _val, _val.tag, JS_VALUE_GET_REF_COUNT(_val) if JS_VALUE_HAS_REF_COUNT(_val) else None)
         return val
 
 
@@ -533,7 +543,7 @@ def demo2():
     rt = QJSRuntime()
     ctx: QJSContext = rt.new_context()
 
-    ctx.eval('''
+    ctx.eval(r'''
         import * as std from 'std';
         import * as os from 'os';
         globalThis.std = std;
@@ -542,40 +552,54 @@ def demo2():
 
     ctx.eval(r'std.puts("AAA\n");')
 
-    # ctx['a0'] = None
-    # val = ctx['a0']
-    # print(val, type(val))
+    ctx['a0'] = None
+    val = ctx['a0']
+    print(val, type(val))
 
-    # ctx['a1'] = True
-    # val = ctx['a1']
-    # print(val, type(val))
+    ctx['a1'] = True
+    val = ctx['a1']
+    print(val, type(val))
 
-    # ctx['a2'] = 10
-    # val = ctx['a2']
-    # print(val, type(val))
+    ctx['a2'] = 10
+    val = ctx['a2']
+    print(val, type(val))
 
-    # ctx['a3'] = 123.45
-    # val = ctx['a3']
-    # print(val, type(val))
+    ctx['a3'] = 123.45
+    val = ctx['a3']
+    print(val, type(val))
 
-    # ctx['a4'] = 'Hello there!'
-    # val = ctx['a4']
-    # print(val, type(val))
+    ctx['a4'] = 'Hello there!'
+    val = ctx['a4']
+    print(val, type(val))
+
+    ctx['a5'] = "This is demo"
+    val = ctx['a5']
+    print(val, type(val))
 
     ctx['b'] = [1, 2.0, '3', [10, [20, 30]]]
-    # ctx['b'] = [1, 2.0, '3']
-    # ctx.eval('b = b.map(n => n * 2)')
     val = ctx['b']
     print(val, type(val))
 
-    # ctx['c'] = {'x': 1, 'y': 2, 'w': [1, 2, 3], 'v': {'a': True, 'b': False}}
+    ctx.eval('b = b.map(n => n * 2)')
+    val = ctx['b']
+    print(val, type(val))
+
+    ctx.eval('b = b.map(n => n * 2)')
+    val = ctx['b']
+    print(val, type(val))
+
+    ctx['c'] = {'x': 1, 'y': 2, 'w': [1, 2, 3], 'v': {'a': True, 'b': False}}
+    val = ctx['c']
+    print(val, type(val))
     # # ctx['c'] = {'x': 1, 'y': 2, 'v': {'a': True, 'b': False}}
     # # ctx['c'] = {'x': 1, 'y': 2, 'w': [1, 2, 3]}
-    # # ctx['c'] = {'x': 1, 'y': 2}
-    # val = ctx['c']
-    # print(val, type(val))
+
+    ctx['c'] = {'x': 1, 'y': 2}
+    val = ctx['c']
+    print(val, type(val))
 
     input('Press any key')
+    rt.free()
 
 
 def demo3():
