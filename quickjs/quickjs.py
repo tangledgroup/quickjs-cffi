@@ -35,32 +35,28 @@ JS_EVAL_FLAG_BACKTRACE_BARRIER = 1 << 6
 JS_EVAL_FLAG_ASYNC = 1 << 7
 
 
-class QJSError(Exception):
-    pass
-
-
 def JS_VALUE_GET_TAG(v: 'JSValue') -> int: # noqa
     #define JS_VALUE_GET_TAG(v) (int)((uintptr_t)(v) & 0xf)
     return v.tag & 0xf
 
 
-def JS_VALUE_GET_NORM_TAG(v: 'JSValue') -> int:
+def JS_VALUE_GET_NORM_TAG(v: 'JSValue') -> int: # noqa
     # /* same as JS_VALUE_GET_TAG, but return JS_TAG_FLOAT64 with NaN boxing */
     #define JS_VALUE_GET_NORM_TAG(v) JS_VALUE_GET_TAG(v)
     return JS_VALUE_GET_TAG(v)
 
 
-def JS_VALUE_GET_INT(v: 'JSValue') -> int:
+def JS_VALUE_GET_INT(v: 'JSValue') -> int: # noqa
     #define JS_VALUE_GET_INT(v) (int)((intptr_t)(v) >> 4)
     return v.u.int32
 
 
-def JS_VALUE_GET_BOOL(v: 'JSValue') -> bool:
+def JS_VALUE_GET_BOOL(v: 'JSValue') -> bool: # noqa
     #define JS_VALUE_GET_BOOL(v) JS_VALUE_GET_INT(v)
     return bool(v.u.int32)
 
 
-def JS_VALUE_GET_FLOAT64(v: 'JSValue') -> float:
+def JS_VALUE_GET_FLOAT64(v: 'JSValue') -> float: # noqa
     #define JS_VALUE_GET_FLOAT64(v) (double)JS_VALUE_GET_INT(v)
     return v.u.float64
 
@@ -85,10 +81,14 @@ def JS_VALUE_HAS_REF_COUNT(v: 'JSValue') -> bool: # noqa
     return abs(JS_VALUE_GET_TAG(v)) >= abs(lib.JS_TAG_FIRST)
 
 
-def JS_VALUE_GET_REF_COUNT(v: 'JSValue') -> int:
-    _v_p: 'void*' = JS_VALUE_GET_PTR(v)
-    _rfh_p: 'JSRefCountHeader*' = ffi.cast('JSRefCountHeader *', _v_p)
+def JS_VALUE_GET_REF_COUNT(v: 'JSValue') -> int: # noqa
+    _v_p: 'void*' = JS_VALUE_GET_PTR(v) # noqa
+    _rfh_p: 'JSRefCountHeader*' = ffi.cast('JSRefCountHeader *', _v_p) # noqa
     return _rfh_p.ref_count
+
+
+def _JS_ToCString(_ctx: 'JSContext*', _val: 'JSValue') -> 'char*': # noqa
+    return lib._inlined_JS_ToCString(_ctx, _val)
 
 
 def _JS_FreeValue(_ctx: 'JSContext*', _val: 'JSValue'): # noqa
@@ -104,7 +104,7 @@ def _JS_Eval(_ctx: 'JSContext*', buf: str, filename: str='<inupt>', eval_flags: 
 
 
 def convert_jsobj_to_pystr(_ctx: 'JSContext*', _val: 'JSValue') -> str: # noqa
-    _c_str: 'char*' = lib._inlined_JS_ToCString(_ctx, _val)
+    _c_str: 'char*' = _JS_ToCString(_ctx, _val) # noqa
     val: bytes = ffi.string(_c_str)
     val: str = val.decode()
     lib.JS_FreeCString(_ctx, _c_str)
@@ -131,35 +131,21 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
     is_exception: bool = lib._inlined_JS_IsException(_val)
 
     if is_exception:
-        lib.js_std_dump_error(_ctx)
+        _e_val = lib.JS_GetException(_ctx)
         _JS_FreeValue(_ctx, _val)
-        raise QJSError(_val.tag)
+        raise QJSError(_ctx, _e_val)
 
     if _val.tag == lib.JS_TAG_FIRST:
         raise NotImplementedError('JS_TAG_FIRST')
     elif _val.tag == lib.JS_TAG_BIG_DECIMAL:
         raise NotImplementedError('JS_TAG_BIG_DECIMAL')
     elif _val.tag == lib.JS_TAG_BIG_INT:
-        _str = lib.JS_ToString(_ctx, _val)
-        _c_str = lib._inlined_JS_ToCString(_ctx, _str)
-        val = ffi.string(_c_str)
-        val = val.decode()
-        val = int(val)
-        lib.JS_FreeCString(_ctx, _c_str)
-        _JS_FreeValue(_ctx, _str)
-        _JS_FreeValue(_ctx, _val)
+        val: str = convert_jsobj_to_pystr(_ctx, _val)
+        val: int = int(val)
     elif _val.tag == lib.JS_TAG_BIG_FLOAT:
         raise NotImplementedError('JS_TAG_BIG_FLOAT')
     elif _val.tag == lib.JS_TAG_SYMBOL:
-        # FIXME: proxy value
-        _atom = lib.JS_ValueToAtom(_ctx, _val)
-        _c_str = lib.JS_AtomToCString(_ctx, _atom)
-        val = ffi.string(_c_str)
-        val = val.decode()
-        val = f'Symbol({val})'
-        lib.JS_FreeCString(_ctx, _c_str)
-        lib.JS_FreeAtom(_ctx, _atom)
-        _JS_FreeValue(_ctx, _val)
+        val = QJSSymbol(_ctx, _val)
     elif _val.tag == lib.JS_TAG_STRING:
         val = QJSString(_ctx, _val)
     elif _val.tag == lib.JS_TAG_MODULE:
@@ -168,14 +154,11 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
         raise NotImplementedError('JS_TAG_FUNCTION_BYTECODE')
     elif _val.tag == lib.JS_TAG_OBJECT:
         if lib.JS_IsFunction(_ctx, _val):
-            # Function
             val = QJSFunction(_ctx, _val, None)
         elif lib.JS_IsArray(_ctx, _val):
-            # Array
             val = QJSArray(_ctx, _val)
         else:
-            # Object, Map, Set, etc
-            val = QJSObject(_ctx, _val)
+            val = QJSObject(_ctx, _val) # Object, Map, Set, etc
     elif _val.tag == lib.JS_TAG_INT:
         val = JS_VALUE_GET_INT(_val)
         _JS_FreeValue(_ctx, _val)
@@ -206,7 +189,7 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
 
 
 def convert_pyargs_to_jsargs(_ctx: 'JSContext*', pyargs: list[Any]) -> ('JSValue', 'JSValue'): # noqa
-    _filename: 'char*' = ffi.cast('char*', 0)
+    _filename: 'char*' = ffi.cast('char*', 0) # noqa
     _val_length = lib._inlined_JS_NewInt32(_ctx, len(pyargs))
     _val = [json.dumps(n).encode() for n in pyargs]
     _val = [lib.JS_ParseJSON(_ctx, n, len(n), _filename) for n in _val]
@@ -257,6 +240,30 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue':
     return _val
 
 
+class QJSError(Exception):
+    def __init__(self, _ctx: 'JSContext*', _val: 'JSValue', verbose: bool=False): # noqa
+        self._ctx = _ctx
+        self._val = _val
+        self.verbose = verbose
+
+
+    def __repr__(self) -> str:
+        _ctx = self._ctx
+        _val: 'JSValue' = self._val # noqa
+
+        is_error = lib.JS_IsError(_ctx, _val)
+
+        _c_str = _JS_ToCString(_ctx, _val)
+        val = ffi.string(_c_str)
+        val = val.decode()
+        lib.JS_FreeCString(_ctx, _c_str)
+
+        if self.verbose:
+            return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {is_error=} {val=}>'
+        else:
+            return f'<{self.__class__.__name__} at {hex(id(self))} {val!r}>'
+
+
 class QJSValue:
     def __init__(self, _ctx: 'JSContext*', _val: 'JSValue'=None): # noqa
         self._ctx = _ctx
@@ -282,6 +289,21 @@ class QJSValue:
 
 class QJSString(QJSValue):
     pass
+
+
+class QJSSymbol(QJSValue):
+    def __repr__(self) -> str:
+        _ctx = self._ctx
+        _val = self._val
+
+        _atom = lib.JS_ValueToAtom(_ctx, _val)
+        _c_str = lib.JS_AtomToCString(_ctx, _atom)
+        val = ffi.string(_c_str)
+        val = val.decode()
+        val = f'Symbol({val})'
+        lib.JS_FreeCString(_ctx, _c_str)
+        lib.JS_FreeAtom(_ctx, _atom)
+        return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {val}>'
 
 
 class QJSArray(QJSValue):
@@ -503,7 +525,7 @@ def demo1():
     val = ctx.eval('Symbol("foo bar")')
     print(val, type(val))
 
-    val = ctx.eval('var a = 1 + 1;')
+    val = ctx.eval('var a = 1 + 1; a')
     print(val, type(val))
 
     val = ctx.eval('1 + 1')
@@ -591,8 +613,6 @@ def demo2():
     ctx['c'] = {'x': 1, 'y': 2, 'w': [1, 2, 3], 'v': {'a': True, 'b': False}}
     val = ctx['c']
     print(val, type(val))
-    # # ctx['c'] = {'x': 1, 'y': 2, 'v': {'a': True, 'b': False}}
-    # # ctx['c'] = {'x': 1, 'y': 2, 'w': [1, 2, 3]}
 
     ctx['c'] = {'x': 1, 'y': 2}
     val = ctx['c']
@@ -653,4 +673,4 @@ def demo4():
 
 
 if __name__ == '__main__':
-    demo2()
+    demo1()
