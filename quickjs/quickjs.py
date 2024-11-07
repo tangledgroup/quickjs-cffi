@@ -1,9 +1,27 @@
-__all__ = ['QJSError', 'Runtime', 'Context']
+__all__ = [
+    'QJSRuntime',
+    'QJSContext',
+    'QJSError',
+]
 
+import os
+import re
+import sys
 import json
+import inspect
+import tempfile
+import urllib.request
 from typing import Any
+
+
 from _quickjs import ffi, lib
 
+
+_c_to_py_context_map: dict['Context*', 'QJSContext'] = {}
+_c_temp: set[Any] = set()
+
+# Regular expression pattern to match URLs
+url_pattern = re.compile(r'^(?:http|ftp|https)://')
 
 # /* JS_Eval() flags */
 #define JS_EVAL_TYPE_GLOBAL   (0 << 0) /* global code (default) */
@@ -188,18 +206,42 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
     return val
 
 
+'''
 def convert_pyargs_to_jsargs(_ctx: 'JSContext*', pyargs: list[Any]) -> ('JSValue', 'JSValue'): # noqa
+    # _filename: 'char*' = ffi.cast('char*', 0) # noqa
+    # _val_length = lib._inlined_JS_NewInt32(_ctx, len(pyargs))
+    # _val = [json.dumps(n).encode() for n in pyargs]
+    # _val = [lib.JS_ParseJSON(_ctx, n, len(n), _filename) for n in _val]
+    # _val = ffi.new('JSValue[]', _val)
+    # return _val_length, _val
     _filename: 'char*' = ffi.cast('char*', 0) # noqa
     _val_length = lib._inlined_JS_NewInt32(_ctx, len(pyargs))
-    _val = [json.dumps(n).encode() for n in pyargs]
-    _val = [lib.JS_ParseJSON(_ctx, n, len(n), _filename) for n in _val]
+    # _val = [json.dumps(n).encode() for n in pyargs]
+    # _val = [lib.JS_ParseJSON(_ctx, n, len(n), _filename) for n in _val]
+    # _val = ffi.new('JSValue[]', _val)
+    _val = [convert_pyvalue_to_jsvalue(_ctx, n) for n in pyargs]
     _val = ffi.new('JSValue[]', _val)
     return _val_length, _val
+'''
+def convert_pyargs_to_jsargs(_ctx: 'JSContext*', pyargs: list[Any]) -> (int, 'JSValue'): # noqa
+    # _filename: 'char*' = ffi.cast('char*', 0) # noqa
+    # _val_length = lib._inlined_JS_NewInt32(_ctx, len(pyargs))
+    # _val = [json.dumps(n).encode() for n in pyargs]
+    # _val = [lib.JS_ParseJSON(_ctx, n, len(n), _filename) for n in _val]
+    # _val = ffi.new('JSValue[]', _val)
+    # return _val_length, _val
+    _filename: 'char*' = ffi.cast('char*', 0) # noqa
+    val_length = len(pyargs)
+    _val = [convert_pyvalue_to_jsvalue(_ctx, n) for n in pyargs]
+    _val = ffi.new('JSValue[]', _val)
+    return val_length, _val
 
 
-def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue':
+def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noqa
     if val is None:
         _val = _JS_Eval(_ctx, 'null')
+    elif isinstance(val, QJSValue):
+        _val = val._val
     elif isinstance(val, bool):
         _val = _JS_Eval(_ctx, json.dumps(val))
     elif isinstance(val, int):
@@ -234,10 +276,47 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue':
 
             # NOTE: line below is not required based on JS_SetPropertyStr logic
             # _JS_FreeValue(_ctx, _v)
+    elif callable(val):
+        @ffi.callback('JSValue(void*, uint64_t, int, uint64_t*)')
+        def _js_func(_ctx2, _this2, argc2, _argv2):
+            # _val2 = lib._inlined_JS_NewBool(_ctx2, _JS_Eval(_ctx2, 'true'))
+            # return _val2
+            _ret: 'JSValue' = _JS_Eval(_ctx2, 'true')
+            # _ret_p: 'JSValue*' = ffi.new('JSValue[]', [_ret])
+            # _ret_u64: 'uint64_t' = ffi.cast('uint64_t', _ret_p[0])
+            # return _ret_u64
+            return _ret
+
+
+        _c_temp.add(_js_func)
+        _js_func_p = ffi.cast('JSValue(*)(JSContext*, JSValueConst, int, JSValueConst*)', _js_func)
+        _func_name = b'_js_func'
+        _length = len(inspect.signature(val).parameters)
+        _js_c_func = lib._inlined_JS_NewCFunction(_ctx, _js_func_p, _func_name, _length)
+        _val = _js_c_func
     else:
         raise ValueError(f'Unsupported Python value {type(val)}')
 
     return _val
+
+
+def download_file_to_tempfile(url: str) -> str:
+    file_extension = os.path.splitext(url)[-1]
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+        with urllib.request.urlopen(url) as response:
+            temp_file.write(response.read())
+
+        return temp_file.name
+
+
+def is_url(path_or_url: str) -> bool:
+    if url_pattern.match(path_or_url):
+        return True
+    elif os.path.exists(path_or_url):
+        return False
+    else:
+        raise ValueError(path_or_url)
 
 
 class QJSError(Exception):
@@ -273,9 +352,25 @@ class QJSValue:
     def __repr__(self) -> str:
         _ctx = self._ctx
         _val = self._val
-
         val: str = stringify_object(_ctx, _val)
         return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {val}>'
+
+
+    def __getattr__(self, attr: str) -> Any:
+        _ctx = self._ctx
+        _val = self._val
+        _c_attr: bytes = attr.encode()
+        _ret = lib.JS_GetPropertyStr(_ctx, _val, _c_attr)
+        ret: Any = convert_jsvalue_to_pyvalue(_ctx, _ret)
+        # print(f'! {attr = } {ret = }')
+
+        if isinstance(ret, QJSValue):
+            ctx = _c_to_py_context_map[_ctx]
+            ctx.add_js_value(ret)
+        else:
+            _JS_FreeValue(_ctx, _ret)
+
+        return ret
 
 
     def free(self):
@@ -315,31 +410,44 @@ class QJSObject(QJSValue):
 
 
 class QJSFunction(QJSValue):
-    def __init__(self, _ctx: 'JSContext*', _func: 'JSValue'=None, _this: 'JSValue'=None): # noqa
+    def __init__(self, _ctx: 'JSContext*', _val: 'JSValue'=None, _this: 'JSValue'=None): # noqa
         self._ctx = _ctx
-        self._func = _func
+        self._val = _val # _func
         self._this = _this if _this else lib.JS_GetGlobalObject(_ctx)
+
+
+    def __repr__(self) -> str:
+        _ctx = self._ctx
+        _val = self._val
+        return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr}>'
 
 
     def __call__(self, *pyargs) -> Any:
         _ctx = self._ctx
-        _func = self._func
+        _val = self._val
         _this = self._this
 
-        _jsargs_len, _jsargs = convert_pyargs_to_jsargs(_ctx, pyargs)
-        jsargs_len = JS_VALUE_GET_INT(_jsargs_len)
+        jsargs_len, _jsargs = convert_pyargs_to_jsargs(_ctx, pyargs)
+        # jsargs_len = JS_VALUE_GET_INT(_jsargs_len)
 
-        _val = lib.JS_Call(_ctx, _func, _this, jsargs_len, _jsargs)
-        val = convert_jsvalue_to_pyvalue(_ctx, _val)
+        print('! QJSFunction.__call__', [_ctx, _val, _this, jsargs_len, _jsargs])
+
+        try:
+            _ret = lib.JS_Call(_ctx, _val, _this, jsargs_len, _jsargs)
+        except Exception as e:
+            print('!!!', e)
+            sys.exit(1)
+
+        ret = convert_jsvalue_to_pyvalue(_ctx, _ret)
         ffi.release(_jsargs)
-        return val
+        return ret
 
 
     def free(self):
         _ctx = self._ctx
-        _func = self._func
+        _val = self._val
         _this = self._this
-        _JS_FreeValue(_ctx, _func)
+        _JS_FreeValue(_ctx, _val)
         _JS_FreeValue(_ctx, _this)
 
 
@@ -359,6 +467,7 @@ class QJSRuntime:
 
     def free(self):
         for ctx in self.ctxs:
+            del _c_to_py_context_map[ctx._ctx]
             ctx.free()
 
         self.ctxs = None
@@ -369,6 +478,7 @@ class QJSRuntime:
     def new_context(self) -> 'QJSContext':
         ctx = QJSContext(self)
         self.ctxs.append(ctx)
+        _c_to_py_context_map[ctx._ctx] = ctx
         return ctx
 
 
@@ -515,6 +625,19 @@ class QJSContext:
         return val
 
 
+    def load_script(self, path_or_url: str):
+        if is_url(path_or_url):
+            path = download_file_to_tempfile(path_or_url)
+        else:
+            path = path_or_url
+
+        with open(path) as f:
+            data: str = f.read()
+
+        val = self.eval(data, path)
+        return val
+
+
 def demo1():
     rt = QJSRuntime()
     ctx: QJSContext = rt.new_context()
@@ -643,6 +766,10 @@ def demo3():
         function f(x, y, z) {
             return x * y * z;
         }
+
+        function g(x, y) {
+            return [...x, ...y];
+        }
     ''')
 
     f = ctx['f']
@@ -654,23 +781,50 @@ def demo3():
     g = ctx.get('g')
     print(f, type(f))
 
-    r = g(20, 30, 40)
+    r = g([20, 30], [40])
     print(r, type(r))
 
     input('Press any key')
 
 
 def demo4():
+    rt = QJSRuntime()
+    ctx: QJSContext = rt.new_context()
+
+    script_url = 'https://raw.githubusercontent.com/lodash/lodash/refs/heads/main/dist/lodash.min.js'
+    ctx.load_script(script_url)
+
+    lodash = ctx['_']
+    print(lodash, type(lodash))
+
+    # r = lodash.range
+    # print(r, type(r))
+
+    # r = lodash.range(10, 100, 10)
+    # print(r, type(r))
+
+    def _f0(n):
+        return n >= 50
+
+    # ctx['_f0'] = _f0
+    # _f0 = ctx.eval('n => n >= 50')
+    r = lodash.filter(lodash.range(10, 100, 10), _f0)
+    print(r, type(r))
+
+    # input('Press any key')
+
+
+def demo5():
     from tqdm import tqdm
 
     rt = QJSRuntime()
 
     for i in tqdm(range(1_000)):
         ctx: QJSContext = rt.new_context()
-        val = ctx.eval('var a = 1 + 1;')
+        ctx.eval('var a = 1 + 1;')
 
     input('Press any key')
 
 
 if __name__ == '__main__':
-    demo1()
+    demo4()

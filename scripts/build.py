@@ -265,6 +265,11 @@ def build_quickjs_repo(*args, **kwargs):
     print('-'* 80)
     _source += '\n\n' + func_declarations
 
+    # extra source declarations
+    _source += '\n\n' + '''
+    typedef JSValue JSValueConst;
+    '''
+
     # print code
     for i, line in enumerate(_source.splitlines()):
         print(i + 1, ':', line)
