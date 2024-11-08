@@ -272,6 +272,8 @@ def build_quickjs_repo(*args, **kwargs):
     typedef JSValue JSValueConst;
 
     extern "Python" JSValue _quikcjs_cffi_py_func_wrap(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data);
+
+    JSValue _quikcjs_cffi_JS_MKPTR(int64_t tag, void *p);
     '''
 
     # print code
@@ -284,6 +286,11 @@ def build_quickjs_repo(*args, **kwargs):
     ffibuilder.set_source(
         '_quickjs',
         '''#include "../_quickjs_lib.h"
+
+        JSValue _quikcjs_cffi_JS_MKPTR(int64_t tag, void *p) {
+            return JS_MKPTR(tag, p);
+        }
+
         ''' + _inline_static_source,
         libraries=['m', 'dl', 'pthread'],
         extra_objects=[

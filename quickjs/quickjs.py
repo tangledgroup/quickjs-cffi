@@ -6,9 +6,7 @@ __all__ = [
 
 import os
 import re
-import sys
 import json
-# import ctypes
 import inspect
 import tempfile
 import urllib.request
@@ -17,87 +15,12 @@ from typing import Any
 from _quickjs import ffi, lib
 
 
-_c_to_py_context_map: dict['Context*', 'QJSContext'] = {}
+_c_to_py_context_map: dict['Context*', 'QJSContext'] = {} # noqa
 _c_temp: set[Any] = set()
 
 # Regular expression pattern to match URLs
 url_pattern = re.compile(r'^(?:http|ftp|https)://')
 
-'''
-#
-# ctypes
-#
-class _c_JSValueUnion(ctypes.Union):
-    _fields_ = [
-        ('int32', ctypes.c_int32),
-        ('float64', ctypes.c_double),
-        ('ptr', ctypes.c_void_p),
-    ]
-
-
-class _c_JSValue(ctypes.Structure):
-    _pack_ = 1
-    _fields_ = [
-        ('u', _c_JSValueUnion),
-        ('tag', ctypes.c_int64),
-    ]
-
-
-_c_JSValueConst = _c_JSValue
-
-# typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
-_c_JSCFunction = ctypes.CFUNCTYPE(
-    _c_JSValue,                         # JSValue
-    ctypes.c_void_p,                    # JSContext *ctx
-    _c_JSValueConst,                    # JSValueConst this_val
-    ctypes.c_int,                       # int argc
-    ctypes.POINTER(_c_JSValueConst),    # JSValueConst *argv
-)
-# _c_JSCFunction = type(
-#     '_c_JSCFunction',
-#     (ctypes._CFuncPtr,),
-#     {
-#         '_restype_': _c_JSValue,
-#         '_argtypes_': (
-#             ctypes.c_void_p,                    # JSContext *ctx
-#             _c_JSValueConst,                    # JSValueConst this_val
-#             ctypes.c_int,                       # int argc
-#             ctypes.POINTER(_c_JSValueConst),    # JSValueConst *argv
-#         ),
-#         '_flags_': ctypes._FUNCFLAG_CDECL,
-#     }
-# )
-
-print(f'!! {_c_JSValueUnion = }')
-print(f'!! {_c_JSValue = }')
-print(f'!! {_c_JSValueConst = }')
-print(f'!! {_c_JSCFunction = }')
-
-_c_u = _c_JSValueUnion()
-_c_u.int32 = 0
-print(f'!! {_c_u = }')
-_c_ret = _c_JSValue(_c_u, 1)
-print(f'!! {_c_ret = }')
-
-
-# @_c_JSCFunction
-def _js_func_wrap(_ctx2, _this2, argc2, _argv2):
-    _c_u = _c_JSValueUnion()
-    _c_u.int32 = 0
-    print(f'!!!! {_c_u = }')
-    _c_ret = _c_JSValue(_c_u, 1)
-    print(f'!!!! {_c_ret = }')
-    return _c_ret
-
-print(f'!!! {_js_func_wrap = }')
-_js_func_wrap_cfunction = _c_JSCFunction(_js_func_wrap)
-print(f'!!! {_js_func_wrap_cfunction = }')
-sys.exit(1)
-'''
-
-#
-# cffi
-#
 # /* JS_Eval() flags */
 #define JS_EVAL_TYPE_GLOBAL   (0 << 0) /* global code (default) */
 JS_EVAL_TYPE_GLOBAL = 0 << 0
@@ -281,30 +204,7 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
     return val
 
 
-'''
-def convert_pyargs_to_jsargs(_ctx: 'JSContext*', pyargs: list[Any]) -> ('JSValue', 'JSValue'): # noqa
-    # _filename: 'char*' = ffi.cast('char*', 0) # noqa
-    # _val_length = lib._inlined_JS_NewInt32(_ctx, len(pyargs))
-    # _val = [json.dumps(n).encode() for n in pyargs]
-    # _val = [lib.JS_ParseJSON(_ctx, n, len(n), _filename) for n in _val]
-    # _val = ffi.new('JSValue[]', _val)
-    # return _val_length, _val
-    _filename: 'char*' = ffi.cast('char*', 0) # noqa
-    _val_length = lib._inlined_JS_NewInt32(_ctx, len(pyargs))
-    # _val = [json.dumps(n).encode() for n in pyargs]
-    # _val = [lib.JS_ParseJSON(_ctx, n, len(n), _filename) for n in _val]
-    # _val = ffi.new('JSValue[]', _val)
-    _val = [convert_pyvalue_to_jsvalue(_ctx, n) for n in pyargs]
-    _val = ffi.new('JSValue[]', _val)
-    return _val_length, _val
-'''
 def convert_pyargs_to_jsargs(_ctx: 'JSContext*', pyargs: list[Any]) -> (int, 'JSValue'): # noqa
-    # _filename: 'char*' = ffi.cast('char*', 0) # noqa
-    # _val_length = lib._inlined_JS_NewInt32(_ctx, len(pyargs))
-    # _val = [json.dumps(n).encode() for n in pyargs]
-    # _val = [lib.JS_ParseJSON(_ctx, n, len(n), _filename) for n in _val]
-    # _val = ffi.new('JSValue[]', _val)
-    # return _val_length, _val
     _filename: 'char*' = ffi.cast('char*', 0) # noqa
     val_length = len(pyargs)
     _val = [convert_pyvalue_to_jsvalue(_ctx, n) for n in pyargs]
@@ -330,8 +230,8 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
         _Array_push_atom = lib.JS_NewAtom(_ctx, b'push')
 
         for n in val:
-            _n: 'JSValue' = convert_pyvalue_to_jsvalue(_ctx, n)
-            _n_p: 'JSValue*' = ffi.new('JSValue[]', [_n])
+            _n: 'JSValue' = convert_pyvalue_to_jsvalue(_ctx, n) # noqa
+            _n_p: 'JSValue*' = ffi.new('JSValue[]', [_n]) # noqa
 
             lib.JS_Invoke(_ctx, _val, _Array_push_atom, 1, _n_p)
 
@@ -352,47 +252,15 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
             # NOTE: line below is not required based on JS_SetPropertyStr logic
             # _JS_FreeValue(_ctx, _v)
     elif callable(val):
-        '''
-        @ffi.callback('JSValue(void*, uint64_t, int, uint64_t*)')
-        def _js_func(_ctx2, _this2, argc2, _argv2):
-            # _val2 = lib._inlined_JS_NewBool(_ctx2, _JS_Eval(_ctx2, 'true'))
-            # return _val2
-            _ret: 'JSValue' = _JS_Eval(_ctx2, 'true')
-            # _ret_p: 'JSValue*' = ffi.new('JSValue[]', [_ret])
-            # _ret_u64: 'uint64_t' = ffi.cast('uint64_t', _ret_p[0])
-            # return _ret_u64
-            return _ret
+        val_handler = ffi.new_handle(val)
+        _c_temp.add(val_handler)
+        _val_handler: 'JSValue' = lib._quikcjs_cffi_JS_MKPTR(lib.JS_TAG_OBJECT, val_handler) # noqa
 
-        print(f'! {_js_func = }')
-
-        _c_temp.add(_js_func)
-        _js_func_p = ffi.cast('JSValue(*)(JSContext*, JSValueConst, int, JSValueConst*)', _js_func)
-        _func_name = b'_js_func'
-        _length = len(inspect.signature(val).parameters)
-        _js_c_func = lib._inlined_JS_NewCFunction(_ctx, _js_func_p, _func_name, _length)
-        _val = _js_c_func
-        '''
-        '''
-        # static JSValue _js_func_wrap(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-        def _js_func_wrap(_ctx2, _this2, argc2, _argv2):
-            _c_u = _c_JSValueUnion()
-            _c_u.int32 = 0
-            _c_ret = _c_JSValue(_c_u, 1)
-            return _c_ret
-
-        print(f'!!! {_js_func_wrap = }')
-        _js_func_wrap_cfunction = _c_JSCFunction(_js_func_wrap)
-        print(f'!!! {_js_func_wrap_cfunction = }')
-        '''
-        # _quikcjs_cffi_py_func_wrap
-        # JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
-        #                             int length, int magic, int data_len,
-        #                             JSValueConst *data);
         _func = lib._quikcjs_cffi_py_func_wrap
         _length = len(inspect.signature(val).parameters)
         _magic = 0
-        _data_len = 0
-        _data = ffi.new('JSValue[]', [])
+        _data_len = 1
+        _data = ffi.new('JSValue[]', [_val_handler])
         _val = lib.JS_NewCFunctionData(_ctx, _func, _length, _magic, _data_len, _data)
     else:
         raise ValueError(f'Unsupported Python value {type(val)}')
@@ -422,8 +290,17 @@ def is_url(path_or_url: str) -> bool:
 # typedef JSValue JSCFunctionData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data);
 @ffi.def_extern()
 def _quikcjs_cffi_py_func_wrap(_ctx, _this_val, _argc, _argv, _magic, _func_data):
-    print('*** _quikcjs_cffi_py_func_wrap')
-    _ret: 'JSValue' = _JS_Eval(_ctx, 'false')
+    _val_handler: 'JSValue' = _func_data[0] # noqa
+    _val_p: 'void*' = JS_VALUE_GET_PTR(_val_handler) # noqa
+    val_handler = ffi.from_handle(_val_p)
+    _c_temp.discard(_val_p)
+    py_func = val_handler
+
+    pyargs = [_argv[i] for i in range(_argc)]
+    pyargs = [convert_jsvalue_to_pyvalue(_ctx, n) for n in pyargs]
+    ret = py_func(*pyargs)
+
+    _ret = convert_pyvalue_to_jsvalue(_ctx, ret)
     return _ret
 
 
@@ -470,7 +347,6 @@ class QJSValue:
         _c_attr: bytes = attr.encode()
         _ret = lib.JS_GetPropertyStr(_ctx, _val, _c_attr)
         ret: Any = convert_jsvalue_to_pyvalue(_ctx, _ret)
-        # print(f'! {attr = } {ret = }')
 
         if isinstance(ret, QJSValue):
             ctx = _c_to_py_context_map[_ctx]
@@ -536,16 +412,7 @@ class QJSFunction(QJSValue):
         _this = self._this
 
         jsargs_len, _jsargs = convert_pyargs_to_jsargs(_ctx, pyargs)
-        # jsargs_len = JS_VALUE_GET_INT(_jsargs_len)
-
-        print('! QJSFunction.__call__', [_ctx, _val, _this, jsargs_len, _jsargs])
-
-        try:
-            _ret = lib.JS_Call(_ctx, _val, _this, jsargs_len, _jsargs)
-        except Exception as e:
-            print('!!!', e)
-            sys.exit(1)
-
+        _ret = lib.JS_Call(_ctx, _val, _this, jsargs_len, _jsargs)
         ret = convert_jsvalue_to_pyvalue(_ctx, _ret)
         ffi.release(_jsargs)
         return ret
@@ -653,7 +520,6 @@ class QJSContext:
         '''
 
         _val: 'JSValue' = _JS_Eval(_ctx, code)
-        # print('! QJSContext.__init__', _val, _val.tag, JS_VALUE_GET_REF_COUNT(_val) if JS_VALUE_HAS_REF_COUNT(_val) else None)
         _JS_FreeValue(_ctx, _val)
 
 
@@ -671,11 +537,8 @@ class QJSContext:
 
     def free(self):
         _ctx = self._ctx
-        # print(f'{len(self.js_values) = }')
-        # print(f'{self.js_values = }')
 
         for js_val in self.js_values:
-            # print('! free 0', js_val, JS_VALUE_GET_REF_COUNT(js_val._val))
             js_val.free()
 
         self.js_values = None
@@ -689,7 +552,6 @@ class QJSContext:
         _key = key.encode()
 
         _val = lib.JS_GetPropertyStr(_ctx, _this, _key)
-        # print('! get 0', _val, JS_VALUE_GET_REF_COUNT(_val))
         val = convert_jsvalue_to_pyvalue(_ctx, _val)
 
         if isinstance(val, QJSValue):
@@ -697,7 +559,6 @@ class QJSContext:
         else:
             _JS_FreeValue(_ctx, _val)
 
-        # print('! get 1', _val, JS_VALUE_GET_REF_COUNT(_val))
         _JS_FreeValue(_ctx, _this)
         return val
 
@@ -708,9 +569,7 @@ class QJSContext:
         _key = key.encode()
         _val = convert_pyvalue_to_jsvalue(_ctx, val)
 
-        # print('! set 0', _val, JS_VALUE_GET_REF_COUNT(_val))
         lib.JS_SetPropertyStr(_ctx, _this, _key, _val)
-        # print('! set 1', _val, JS_VALUE_GET_REF_COUNT(_val))
 
         # NOTE: do not free _val because set does not increase ref count
         #   _JS_FreeValue(_ctx, _val)
@@ -720,16 +579,13 @@ class QJSContext:
     def eval(self, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
         _ctx = self._ctx
         _val: 'JSValue' = _JS_Eval(_ctx, buf, filename, eval_flags) # noqa
-        # print('! eval 0', _val, _val.tag, JS_VALUE_GET_REF_COUNT(_val) if JS_VALUE_HAS_REF_COUNT(_val) else None)
         val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
 
         if isinstance(val, QJSValue):
-            # print('! eval 1', val)
             self.add_js_value(val)
         else:
             _JS_FreeValue(_ctx, _val)
 
-        # print('! eval 2', _val, _val.tag, JS_VALUE_GET_REF_COUNT(_val) if JS_VALUE_HAS_REF_COUNT(_val) else None)
         return val
 
 
@@ -789,7 +645,7 @@ def demo1():
     except QJSError as e:
         print(f'QJSError {e = }')
 
-    input('Press any key')
+    rt.free()
 
 
 def demo2():
@@ -849,7 +705,6 @@ def demo2():
     val = ctx['c']
     print(val, type(val))
 
-    input('Press any key')
     rt.free()
 
 
@@ -892,7 +747,7 @@ def demo3():
     r = g([20, 30], [40])
     print(r, type(r))
 
-    input('Press any key')
+    rt.free()
 
 
 def demo4():
@@ -911,15 +766,32 @@ def demo4():
     # r = lodash.range(10, 100, 10)
     # print(r, type(r))
 
-    def _f0(n):
-        return n >= 50
-
-    # ctx['_f0'] = _f0
-    # _f0 = ctx.eval('n => n >= 50')
+    _f0 = ctx.eval('n => n >= 50')
     r = lodash.filter(lodash.range(10, 100, 10), _f0)
     print(r, type(r))
 
-    # input('Press any key')
+    def _f0(n, *args): return n >= 50
+    r = lodash.filter(lodash.range(10, 100, 10), _f0)
+    print(r, type(r))
+
+    def _f0(n, *args): return n >= 50
+    ctx['_f0'] = _f0
+    r = lodash.filter(lodash.range(10, 100, 10), ctx.eval('_f0'))
+    print(r, type(r))
+
+    _f0 = lambda n, *args: n >= 50
+    r = lodash.filter(lodash.range(10, 100, 10), _f0)
+    print(r, type(r))
+
+    _f0 = lambda n, *args: n >= 50
+    ctx['_f0'] = _f0
+    r = lodash.filter(lodash.range(10, 100, 10), ctx.eval('_f0'))
+    print(r, type(r))
+
+    r = lodash.filter(lodash.range(10, 100, 10), lambda n, *args: n >= 50)
+    print(r, type(r))
+
+    rt.free()
 
 
 def demo5():
@@ -931,8 +803,12 @@ def demo5():
         ctx: QJSContext = rt.new_context()
         ctx.eval('var a = 1 + 1;')
 
-    input('Press any key')
+    rt.free()
 
 
 if __name__ == '__main__':
-    demo4()
+    demo1()
+    # demo2()
+    # demo3()
+    # demo4()
+    input('Press any key')
