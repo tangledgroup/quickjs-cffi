@@ -8,11 +8,11 @@ import os
 import re
 import sys
 import json
+# import ctypes
 import inspect
 import tempfile
 import urllib.request
 from typing import Any
-
 
 from _quickjs import ffi, lib
 
@@ -23,6 +23,81 @@ _c_temp: set[Any] = set()
 # Regular expression pattern to match URLs
 url_pattern = re.compile(r'^(?:http|ftp|https)://')
 
+'''
+#
+# ctypes
+#
+class _c_JSValueUnion(ctypes.Union):
+    _fields_ = [
+        ('int32', ctypes.c_int32),
+        ('float64', ctypes.c_double),
+        ('ptr', ctypes.c_void_p),
+    ]
+
+
+class _c_JSValue(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ('u', _c_JSValueUnion),
+        ('tag', ctypes.c_int64),
+    ]
+
+
+_c_JSValueConst = _c_JSValue
+
+# typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
+_c_JSCFunction = ctypes.CFUNCTYPE(
+    _c_JSValue,                         # JSValue
+    ctypes.c_void_p,                    # JSContext *ctx
+    _c_JSValueConst,                    # JSValueConst this_val
+    ctypes.c_int,                       # int argc
+    ctypes.POINTER(_c_JSValueConst),    # JSValueConst *argv
+)
+# _c_JSCFunction = type(
+#     '_c_JSCFunction',
+#     (ctypes._CFuncPtr,),
+#     {
+#         '_restype_': _c_JSValue,
+#         '_argtypes_': (
+#             ctypes.c_void_p,                    # JSContext *ctx
+#             _c_JSValueConst,                    # JSValueConst this_val
+#             ctypes.c_int,                       # int argc
+#             ctypes.POINTER(_c_JSValueConst),    # JSValueConst *argv
+#         ),
+#         '_flags_': ctypes._FUNCFLAG_CDECL,
+#     }
+# )
+
+print(f'!! {_c_JSValueUnion = }')
+print(f'!! {_c_JSValue = }')
+print(f'!! {_c_JSValueConst = }')
+print(f'!! {_c_JSCFunction = }')
+
+_c_u = _c_JSValueUnion()
+_c_u.int32 = 0
+print(f'!! {_c_u = }')
+_c_ret = _c_JSValue(_c_u, 1)
+print(f'!! {_c_ret = }')
+
+
+# @_c_JSCFunction
+def _js_func_wrap(_ctx2, _this2, argc2, _argv2):
+    _c_u = _c_JSValueUnion()
+    _c_u.int32 = 0
+    print(f'!!!! {_c_u = }')
+    _c_ret = _c_JSValue(_c_u, 1)
+    print(f'!!!! {_c_ret = }')
+    return _c_ret
+
+print(f'!!! {_js_func_wrap = }')
+_js_func_wrap_cfunction = _c_JSCFunction(_js_func_wrap)
+print(f'!!! {_js_func_wrap_cfunction = }')
+sys.exit(1)
+'''
+
+#
+# cffi
+#
 # /* JS_Eval() flags */
 #define JS_EVAL_TYPE_GLOBAL   (0 << 0) /* global code (default) */
 JS_EVAL_TYPE_GLOBAL = 0 << 0
@@ -277,6 +352,7 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
             # NOTE: line below is not required based on JS_SetPropertyStr logic
             # _JS_FreeValue(_ctx, _v)
     elif callable(val):
+        '''
         @ffi.callback('JSValue(void*, uint64_t, int, uint64_t*)')
         def _js_func(_ctx2, _this2, argc2, _argv2):
             # _val2 = lib._inlined_JS_NewBool(_ctx2, _JS_Eval(_ctx2, 'true'))
@@ -287,6 +363,7 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
             # return _ret_u64
             return _ret
 
+        print(f'! {_js_func = }')
 
         _c_temp.add(_js_func)
         _js_func_p = ffi.cast('JSValue(*)(JSContext*, JSValueConst, int, JSValueConst*)', _js_func)
@@ -294,6 +371,29 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
         _length = len(inspect.signature(val).parameters)
         _js_c_func = lib._inlined_JS_NewCFunction(_ctx, _js_func_p, _func_name, _length)
         _val = _js_c_func
+        '''
+        '''
+        # static JSValue _js_func_wrap(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+        def _js_func_wrap(_ctx2, _this2, argc2, _argv2):
+            _c_u = _c_JSValueUnion()
+            _c_u.int32 = 0
+            _c_ret = _c_JSValue(_c_u, 1)
+            return _c_ret
+
+        print(f'!!! {_js_func_wrap = }')
+        _js_func_wrap_cfunction = _c_JSCFunction(_js_func_wrap)
+        print(f'!!! {_js_func_wrap_cfunction = }')
+        '''
+        # _quikcjs_cffi_py_func_wrap
+        # JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
+        #                             int length, int magic, int data_len,
+        #                             JSValueConst *data);
+        _func = lib._quikcjs_cffi_py_func_wrap
+        _length = len(inspect.signature(val).parameters)
+        _magic = 0
+        _data_len = 0
+        _data = ffi.new('JSValue[]', [])
+        _val = lib.JS_NewCFunctionData(_ctx, _func, _length, _magic, _data_len, _data)
     else:
         raise ValueError(f'Unsupported Python value {type(val)}')
 
@@ -317,6 +417,14 @@ def is_url(path_or_url: str) -> bool:
         return False
     else:
         raise ValueError(path_or_url)
+
+
+# typedef JSValue JSCFunctionData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data);
+@ffi.def_extern()
+def _quikcjs_cffi_py_func_wrap(_ctx, _this_val, _argc, _argv, _magic, _func_data):
+    print('*** _quikcjs_cffi_py_func_wrap')
+    _ret: 'JSValue' = _JS_Eval(_ctx, 'false')
+    return _ret
 
 
 class QJSError(Exception):

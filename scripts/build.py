@@ -36,6 +36,7 @@ def add_prefix_to_function(func_signature: str, prefix: str) -> str:
     return re.sub(pattern, replacer, func_signature, flags=re.VERBOSE)
 
 
+'''
 def add_prefix_to_macro(macros):
     output = []
 
@@ -53,6 +54,7 @@ def add_prefix_to_macro(macros):
         output.append(function_def)
 
     return '\n'.join(output)
+'''
 
 
 def get_func_declarations(source_code: str) -> list[str]:
@@ -268,6 +270,8 @@ def build_quickjs_repo(*args, **kwargs):
     # extra source declarations
     _source += '\n\n' + '''
     typedef JSValue JSValueConst;
+
+    extern "Python" JSValue _quikcjs_cffi_py_func_wrap(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data);
     '''
 
     # print code
