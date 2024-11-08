@@ -7,15 +7,16 @@ __all__ = [
 import os
 import re
 import json
+import time
 import inspect
 import tempfile
 import urllib.request
 from typing import Any
+from weakref import WeakSet
 
 from _quickjs import ffi, lib
 
 
-_c_to_py_context_map: dict['Context*', 'QJSContext'] = {} # noqa
 _c_temp: set[Any] = set()
 
 # Regular expression pattern to match URLs
@@ -119,7 +120,7 @@ def _JS_Eval(_ctx: 'JSContext*', buf: str, filename: str='<inupt>', eval_flags: 
     return _val
 
 
-def convert_jsobj_to_pystr(_ctx: 'JSContext*', _val: 'JSValue') -> str: # noqa
+def convert_jsvalue_to_pystr(_ctx: 'JSContext*', _val: 'JSValue') -> str: # noqa
     _c_str: 'char*' = _JS_ToCString(_ctx, _val) # noqa
     val: bytes = ffi.string(_c_str)
     val: str = val.decode()
@@ -134,7 +135,7 @@ def stringify_object(_ctx: 'JSContext*', _obj: 'JSValue') -> str: # noqa
     _jsargs: 'JSValue*' = ffi.new('JSValue[]', [_obj]) # noqa
 
     _val = lib.JS_Call(_ctx, _func, _this, jsargs_len, _jsargs)
-    val = convert_jsobj_to_pystr(_ctx, _val)
+    val = convert_jsvalue_to_pystr(_ctx, _val)
 
     ffi.release(_jsargs)
     _JS_FreeValue(_ctx, _val)
@@ -149,14 +150,15 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
     if is_exception:
         _e_val = lib.JS_GetException(_ctx)
         _JS_FreeValue(_ctx, _val)
-        raise QJSError(_ctx, _e_val)
+        e = QJSError(_ctx, _e_val)
+        raise e
 
     if _val.tag == lib.JS_TAG_FIRST:
         raise NotImplementedError('JS_TAG_FIRST')
     elif _val.tag == lib.JS_TAG_BIG_DECIMAL:
         raise NotImplementedError('JS_TAG_BIG_DECIMAL')
     elif _val.tag == lib.JS_TAG_BIG_INT:
-        val: str = convert_jsobj_to_pystr(_ctx, _val)
+        val: str = convert_jsvalue_to_pystr(_ctx, _val)
         val: int = int(val)
     elif _val.tag == lib.JS_TAG_BIG_FLOAT:
         raise NotImplementedError('JS_TAG_BIG_FLOAT')
@@ -227,6 +229,7 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
         _val = _JS_Eval(_ctx, json.dumps(val))
     elif isinstance(val, (list, tuple)):
         _val = lib.JS_NewArray(_ctx)
+        val2 = QJSValue(_ctx, _val)
         _Array_push_atom = lib.JS_NewAtom(_ctx, b'push')
 
         for n in val:
@@ -241,6 +244,7 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
         lib.JS_FreeAtom(_ctx, _Array_push_atom)
     elif isinstance(val, dict):
         _val = lib.JS_NewObject(_ctx)
+        val2 = QJSValue(_ctx, _val)
 
         for k, v in val.items():
             assert isinstance(k, str)
@@ -250,18 +254,24 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
             lib.JS_SetPropertyStr(_ctx, _val, _k, _v)
 
             # NOTE: line below is not required based on JS_SetPropertyStr logic
-            # _JS_FreeValue(_ctx, _v)
+            #   _JS_FreeValue(_ctx, _v)
     elif callable(val):
-        val_handler = ffi.new_handle(val)
+        val_handler: 'void*' = ffi.new_handle(val) # noqa
         _c_temp.add(val_handler)
         _val_handler: 'JSValue' = lib._quikcjs_cffi_JS_MKPTR(lib.JS_TAG_OBJECT, val_handler) # noqa
+        # _c_temp.add(_val_handler)
+
+        # val2 = QJSValue(_ctx, _val_handler)
 
         _func = lib._quikcjs_cffi_py_func_wrap
         _length = len(inspect.signature(val).parameters)
         _magic = 0
         _data_len = 1
-        _data = ffi.new('JSValue[]', [_val_handler])
+        _data = ffi.addressof(_val_handler)
+        # _data = ffi.new('JSValue[]', [_val_handler])
         _val = lib.JS_NewCFunctionData(_ctx, _func, _length, _magic, _data_len, _data)
+
+        # val2 = QJSValue(_ctx, _val)
     else:
         raise ValueError(f'Unsupported Python value {type(val)}')
 
@@ -293,7 +303,6 @@ def _quikcjs_cffi_py_func_wrap(_ctx, _this_val, _argc, _argv, _magic, _func_data
     _val_handler: 'JSValue' = _func_data[0] # noqa
     _val_p: 'void*' = JS_VALUE_GET_PTR(_val_handler) # noqa
     val_handler = ffi.from_handle(_val_p)
-    _c_temp.discard(_val_p)
     py_func = val_handler
 
     pyargs = [_argv[i] for i in range(_argc)]
@@ -301,37 +310,30 @@ def _quikcjs_cffi_py_func_wrap(_ctx, _this_val, _argc, _argv, _magic, _func_data
     ret = py_func(*pyargs)
 
     _ret = convert_pyvalue_to_jsvalue(_ctx, ret)
+    # _c_temp.discard(_val_p)
+    print(f'{_c_temp = }')
     return _ret
-
-
-class QJSError(Exception):
-    def __init__(self, _ctx: 'JSContext*', _val: 'JSValue', verbose: bool=False): # noqa
-        self._ctx = _ctx
-        self._val = _val
-        self.verbose = verbose
-
-
-    def __repr__(self) -> str:
-        _ctx = self._ctx
-        _val: 'JSValue' = self._val # noqa
-
-        is_error = lib.JS_IsError(_ctx, _val)
-
-        _c_str = _JS_ToCString(_ctx, _val)
-        val = ffi.string(_c_str)
-        val = val.decode()
-        lib.JS_FreeCString(_ctx, _c_str)
-
-        if self.verbose:
-            return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {is_error=} {val=}>'
-        else:
-            return f'<{self.__class__.__name__} at {hex(id(self))} {val!r}>'
 
 
 class QJSValue:
     def __init__(self, _ctx: 'JSContext*', _val: 'JSValue'=None): # noqa
         self._ctx = _ctx
         self._val = _val
+
+        ctx = QJSContext.get_qjscontext(_ctx)
+        ctx.add_qjsvalue(self)
+
+
+    def __del__(self):
+        _ctx = self._ctx
+        _val = self._val
+        _rt = lib.JS_GetRuntime(_ctx)
+
+        if lib.JS_IsLiveObject(_rt, _val):
+            _JS_FreeValue(_ctx, _val)
+
+
+    free = __del__
 
 
     def __repr__(self) -> str:
@@ -348,22 +350,14 @@ class QJSValue:
         _ret = lib.JS_GetPropertyStr(_ctx, _val, _c_attr)
         ret: Any = convert_jsvalue_to_pyvalue(_ctx, _ret)
 
-        if isinstance(ret, QJSValue):
-            ctx = _c_to_py_context_map[_ctx]
-            ctx.add_js_value(ret)
-        else:
-            _JS_FreeValue(_ctx, _ret)
+        # if isinstance(ret, QJSValue):
+        #     pass
+        # else:
+        #     _JS_FreeValue(_ctx, _ret)
 
         return ret
 
 
-    def free(self):
-        _ctx = self._ctx
-        _val = self._val
-        _rt = lib.JS_GetRuntime(_ctx)
-
-        if lib.JS_IsLiveObject(_rt, _val):
-            _JS_FreeValue(_ctx, _val)
 
 
 class QJSString(QJSValue):
@@ -399,6 +393,9 @@ class QJSFunction(QJSValue):
         self._val = _val # _func
         self._this = _this if _this else lib.JS_GetGlobalObject(_ctx)
 
+        ctx = QJSContext.get_qjscontext(_ctx)
+        ctx.add_qjsvalue(self)
+
 
     def __repr__(self) -> str:
         _ctx = self._ctx
@@ -415,6 +412,12 @@ class QJSFunction(QJSValue):
         _ret = lib.JS_Call(_ctx, _val, _this, jsargs_len, _jsargs)
         ret = convert_jsvalue_to_pyvalue(_ctx, _ret)
         ffi.release(_jsargs)
+
+        # if isinstance(ret, QJSValue):
+        #     pass
+        # else:
+        #     _JS_FreeValue(_ctx, _ret)
+
         return ret
 
 
@@ -426,10 +429,37 @@ class QJSFunction(QJSValue):
         _JS_FreeValue(_ctx, _this)
 
 
+class QJSError(QJSValue, Exception):
+    def __init__(self, _ctx: 'JSContext*', _val: 'JSValue', verbose: bool=False): # noqa
+        self._ctx = _ctx
+        self._val = _val
+        self.verbose = verbose
+
+        ctx = QJSContext.get_qjscontext(_ctx)
+        ctx.add_qjsvalue(self)
+
+
+    def __repr__(self) -> str:
+        _ctx = self._ctx
+        _val: 'JSValue' = self._val # noqa
+
+        is_error = lib.JS_IsError(_ctx, _val)
+
+        _c_str = _JS_ToCString(_ctx, _val)
+        val = ffi.string(_c_str)
+        val = val.decode()
+        lib.JS_FreeCString(_ctx, _c_str)
+
+        if self.verbose:
+            return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {is_error=} {val=}>'
+        else:
+            return f'<{self.__class__.__name__} at {hex(id(self))} {val!r}>'
+
+
 class QJSRuntime:
     def __init__(self):
         self._rt = lib.JS_NewRuntime()
-        self.ctxs = []
+        self.ctxs: WeakSet['QJSContext'] = WeakSet()
         lib.js_std_init_handlers(self._rt)
 
         lib.JS_SetModuleLoaderFunc(
@@ -440,9 +470,8 @@ class QJSRuntime:
         )
 
 
-    def free(self):
+    def __del__(self):
         for ctx in self.ctxs:
-            del _c_to_py_context_map[ctx._ctx]
             ctx.free()
 
         self.ctxs = None
@@ -450,18 +479,33 @@ class QJSRuntime:
         lib.JS_FreeRuntime(self._rt)
 
 
+    free = __del__
+
+
     def new_context(self) -> 'QJSContext':
         ctx = QJSContext(self)
-        self.ctxs.append(ctx)
-        _c_to_py_context_map[ctx._ctx] = ctx
         return ctx
 
 
+    def add_qjscontext(self, ctx: 'QJSContext'):
+        self.ctxs.add(ctx)
+
+
+    def del_qjscontext(self, ctx: 'QJSContext'):
+        self.ctxs.discard(ctx)
+
+
 class QJSContext:
+    c_to_py_context_map: dict['Context*', 'QJSContext'] = {} # noqa
+
+
     def __init__(self, rt: QJSRuntime):
         self.rt = rt
         self._ctx = _ctx = lib.JS_NewContext(self.rt._rt)
-        self.js_values = []
+        rt.add_qjscontext(self)
+        QJSContext.set_qjscontext(_ctx, self)
+        self.qjsvalues: WeakSet[QJSValue] = WeakSet()
+        self.cffi_handle_rc: dict['void*', int] = {} # noqa
         lib.JS_AddIntrinsicBigFloat(_ctx)
         lib.JS_AddIntrinsicBigDecimal(_ctx)
         lib.JS_AddIntrinsicOperators(_ctx)
@@ -519,8 +563,24 @@ class QJSContext:
         globalThis.__stringifyObject = stringifyObject;
         '''
 
-        _val: 'JSValue' = _JS_Eval(_ctx, code)
+        _val: 'JSValue' = _JS_Eval(_ctx, code) # noqa
         _JS_FreeValue(_ctx, _val)
+
+
+    def __del__(self):
+        _ctx = self._ctx
+
+        for js_val in self.qjsvalues:
+            js_val.free()
+
+        self.qjsvalues = None
+        self._ctx = None
+        self.rt.del_qjscontext(self)
+        QJSContext.del_qjscontext(_ctx)
+        lib.JS_FreeContext(_ctx)
+
+
+    free = __del__
 
 
     def __getitem__(self, key: str) -> Any:
@@ -531,19 +591,24 @@ class QJSContext:
         self.set(key, value)
 
 
-    def add_js_value(self, js_value: QJSValue):
-        self.js_values.append(js_value)
+    def add_qjsvalue(self, js_value: QJSValue):
+        self.qjsvalues.add(js_value)
 
 
-    def free(self):
-        _ctx = self._ctx
+    @classmethod
+    def get_qjscontext(cls, _ctx: 'Context*') -> 'QJSContext':
+        ctx = cls.c_to_py_context_map[_ctx]
+        return ctx
 
-        for js_val in self.js_values:
-            js_val.free()
 
-        self.js_values = None
-        self._ctx = None
-        lib.JS_FreeContext(_ctx)
+    @classmethod
+    def set_qjscontext(cls, _ctx: 'Context*', ctx: 'QJSContext'):
+        cls.c_to_py_context_map[_ctx] = ctx
+
+
+    @classmethod
+    def del_qjscontext(cls, _ctx: 'Context*'):
+        del cls.c_to_py_context_map[_ctx]
 
 
     def get(self, key: str) -> Any:
@@ -555,7 +620,7 @@ class QJSContext:
         val = convert_jsvalue_to_pyvalue(_ctx, _val)
 
         if isinstance(val, QJSValue):
-            self.add_js_value(val)
+            self.add_qjsvalue(val)
         else:
             _JS_FreeValue(_ctx, _val)
 
@@ -579,10 +644,14 @@ class QJSContext:
     def eval(self, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
         _ctx = self._ctx
         _val: 'JSValue' = _JS_Eval(_ctx, buf, filename, eval_flags) # noqa
+        # if JS_VALUE_HAS_REF_COUNT(_val): print('*** [0]', JS_VALUE_GET_REF_COUNT(_val))
         val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
 
         if isinstance(val, QJSValue):
-            self.add_js_value(val)
+            # if JS_VALUE_HAS_REF_COUNT(_val): print('*** [1]', JS_VALUE_GET_REF_COUNT(val._val))
+            self.add_qjsvalue(val)
+            # if JS_VALUE_HAS_REF_COUNT(_val): print('*** [2]', JS_VALUE_GET_REF_COUNT(val._val))
+
         else:
             _JS_FreeValue(_ctx, _val)
 
@@ -605,6 +674,9 @@ class QJSContext:
 def demo1():
     rt = QJSRuntime()
     ctx: QJSContext = rt.new_context()
+
+    val = ctx.eval('null')
+    print(val, type(val))
 
     val = ctx.eval('2n ** 512n')
     print(val, type(val))
@@ -644,8 +716,6 @@ def demo1():
         print(val, type(val))
     except QJSError as e:
         print(f'QJSError {e = }')
-
-    rt.free()
 
 
 def demo2():
@@ -705,8 +775,6 @@ def demo2():
     val = ctx['c']
     print(val, type(val))
 
-    rt.free()
-
 
 def demo3():
     rt = QJSRuntime()
@@ -733,6 +801,10 @@ def demo3():
         function g(x, y) {
             return [...x, ...y];
         }
+
+        function h(x, y) {
+            return Object.assign({}, x, y);
+        }
     ''')
 
     f = ctx['f']
@@ -744,10 +816,14 @@ def demo3():
     g = ctx.get('g')
     print(f, type(f))
 
-    r = g([20, 30], [40])
+    r = g([20, 30], [40, 50, 60])
     print(r, type(r))
 
-    rt.free()
+    h = ctx.get('h')
+    print(f, type(f))
+
+    r = h({'20': 20}, {'40': 40, '50': 50})
+    print(r, type(r))
 
 
 def demo4():
@@ -766,32 +842,30 @@ def demo4():
     # r = lodash.range(10, 100, 10)
     # print(r, type(r))
 
-    _f0 = ctx.eval('n => n >= 50')
-    r = lodash.filter(lodash.range(10, 100, 10), _f0)
-    print(r, type(r))
+    # _f0 = ctx.eval('n => n >= 50')
+    # r = lodash.filter(lodash.range(10, 100, 10), _f0)
+    # print(r, type(r))
 
     def _f0(n, *args): return n >= 50
     r = lodash.filter(lodash.range(10, 100, 10), _f0)
     print(r, type(r))
 
-    def _f0(n, *args): return n >= 50
-    ctx['_f0'] = _f0
-    r = lodash.filter(lodash.range(10, 100, 10), ctx.eval('_f0'))
-    print(r, type(r))
+    # def _f0(n, *args): return n >= 50
+    # ctx['_f0'] = _f0
+    # r = lodash.filter(lodash.range(10, 100, 10), ctx.eval('_f0'))
+    # print(r, type(r))
 
-    _f0 = lambda n, *args: n >= 50
-    r = lodash.filter(lodash.range(10, 100, 10), _f0)
-    print(r, type(r))
+    # _f0 = lambda n, *args: n >= 50
+    # r = lodash.filter(lodash.range(10, 100, 10), _f0)
+    # print(r, type(r))
 
-    _f0 = lambda n, *args: n >= 50
-    ctx['_f0'] = _f0
-    r = lodash.filter(lodash.range(10, 100, 10), ctx.eval('_f0'))
-    print(r, type(r))
+    # _f0 = lambda n, *args: n >= 50
+    # ctx['_f0'] = _f0
+    # r = lodash.filter(lodash.range(10, 100, 10), ctx.eval('_f0'))
+    # print(r, type(r))
 
-    r = lodash.filter(lodash.range(10, 100, 10), lambda n, *args: n >= 50)
-    print(r, type(r))
-
-    rt.free()
+    # r = lodash.filter(lodash.range(10, 100, 10), lambda n, *args: n >= 50)
+    # print(r, type(r))
 
 
 def demo5():
@@ -803,12 +877,10 @@ def demo5():
         ctx: QJSContext = rt.new_context()
         ctx.eval('var a = 1 + 1;')
 
-    rt.free()
-
 
 if __name__ == '__main__':
     demo1()
-    # demo2()
+    demo2()
     # demo3()
     # demo4()
-    input('Press any key')
+    # input('Press any key')
