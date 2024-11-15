@@ -21,10 +21,20 @@ import json
 import inspect
 import tempfile
 import urllib.request
-from typing import Any
 from weakref import WeakSet
+from typing import Any, NewType
 
 from ._quickjs import ffi, lib
+
+
+_void_p = NewType('void*', ffi.typeof('void*'))
+_char_p = NewType('char*', ffi.typeof('char*'))
+_JSContext = NewType('JSContext', ffi.typeof('JSContext'))
+_JSContext_P = NewType('JSContext*', ffi.typeof('JSContext*'))
+_JSValue = NewType('JSValue', ffi.typeof('JSValue'))
+_JSValue_P = NewType('JSValue*', ffi.typeof('JSValue*'))
+_JSString_P = NewType('JSString*', ffi.typeof('void*'))
+_JSObject_P = NewType('JSObject*', ffi.typeof('JSObject*'))
 
 
 _c_temp: set[Any] = set()
@@ -62,87 +72,87 @@ JS_EVAL_FLAG_BACKTRACE_BARRIER = 1 << 6
 JS_EVAL_FLAG_ASYNC = 1 << 7
 
 
-def JS_VALUE_GET_TAG(v: 'JSValue') -> int: # noqa
+def JS_VALUE_GET_TAG(v: _JSValue) -> int:
     #define JS_VALUE_GET_TAG(v) (int)((uintptr_t)(v) & 0xf)
     return v.tag & 0xf
 
 
-def JS_VALUE_GET_NORM_TAG(v: 'JSValue') -> int: # noqa
+def JS_VALUE_GET_NORM_TAG(v: _JSValue) -> int:
     # /* same as JS_VALUE_GET_TAG, but return JS_TAG_FLOAT64 with NaN boxing */
     #define JS_VALUE_GET_NORM_TAG(v) JS_VALUE_GET_TAG(v)
     return JS_VALUE_GET_TAG(v)
 
 
-def JS_VALUE_GET_INT(v: 'JSValue') -> int: # noqa
+def JS_VALUE_GET_INT(v: _JSValue) -> int:
     #define JS_VALUE_GET_INT(v) (int)((intptr_t)(v) >> 4)
     return v.u.int32
 
 
-def JS_VALUE_GET_BOOL(v: 'JSValue') -> bool: # noqa
+def JS_VALUE_GET_BOOL(v: _JSValue) -> bool:
     #define JS_VALUE_GET_BOOL(v) JS_VALUE_GET_INT(v)
     return bool(v.u.int32)
 
 
-def JS_VALUE_GET_FLOAT64(v: 'JSValue') -> float: # noqa
+def JS_VALUE_GET_FLOAT64(v: _JSValue) -> float:
     #define JS_VALUE_GET_FLOAT64(v) (double)JS_VALUE_GET_INT(v)
     return v.u.float64
 
 
-def JS_VALUE_GET_PTR(v: 'JSValue') -> 'void *': # noqa
+def JS_VALUE_GET_PTR(v: _JSValue) -> _void_p:
     #define JS_VALUE_GET_PTR(v) (void *)((intptr_t)(v) & ~0xf)
     return v.u.ptr
 
 
-def JS_VALUE_GET_OBJ(v: 'JSValue') -> 'JSObject *': # noqa
+def JS_VALUE_GET_OBJ(v: _JSValue) -> _JSObject_P:
     #define JS_VALUE_GET_OBJ(v) ((JSObject *)JS_VALUE_GET_PTR(v))
-    return ffi.cast('JSObject *', JS_VALUE_GET_PTR(v))
+    return ffi.cast('JSObject*', JS_VALUE_GET_PTR(v))
 
 
-def JS_VALUE_GET_STRING(v: 'JSValue') -> 'JSString *': # noqa
+def JS_VALUE_GET_STRING(v: _JSValue) -> _JSString_P:
     #define JS_VALUE_GET_STRING(v) ((JSString *)JS_VALUE_GET_PTR(v))
-    return ffi.cast('JSString *', JS_VALUE_GET_PTR(v))
+    return ffi.cast('JSString*', JS_VALUE_GET_PTR(v))
 
 
-def JS_VALUE_HAS_REF_COUNT(v: 'JSValue') -> bool: # noqa
+def JS_VALUE_HAS_REF_COUNT(v: _JSValue) -> bool:
     #define JS_VALUE_HAS_REF_COUNT(v) ((unsigned)JS_VALUE_GET_TAG(v) >= (unsigned)JS_TAG_FIRST)
     return abs(JS_VALUE_GET_TAG(v)) >= abs(lib.JS_TAG_FIRST)
 
 
-def JS_VALUE_GET_REF_COUNT(v: 'JSValue') -> int: # noqa
-    _v_p: 'void*' = JS_VALUE_GET_PTR(v) # noqa
-    _rfh_p: 'JSRefCountHeader*' = ffi.cast('JSRefCountHeader *', _v_p) # noqa
+def JS_VALUE_GET_REF_COUNT(v: _JSValue) -> int:
+    _v_p: _void_p = JS_VALUE_GET_PTR(v)
+    _rfh_p: 'JSRefCountHeader*' = ffi.cast('JSRefCountHeader *', _v_p)
     return _rfh_p.ref_count
 
 
-def _JS_ToCString(_ctx: 'JSContext*', _val: 'JSValue') -> 'char*': # noqa
+def _JS_ToCString(_ctx: _JSContext_P, _val: _JSValue) -> _char_p:
     return lib._inline_JS_ToCString(_ctx, _val)
 
 
-def _JS_FreeValue(_ctx: 'JSContext*', _val: 'JSValue'): # noqa
+def _JS_FreeValue(_ctx: _JSContext_P, _val: _JSValue):
     lib._inline_JS_FreeValue(_ctx, _val)
 
 
-def _JS_Eval(_ctx: 'JSContext*', buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any: # noqa
+def _JS_Eval(_ctx: _JSContext_P, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
     _buf: bytes = buf.encode()
     _buf_len: int = len(_buf)
     _filename: bytes = filename.encode()
-    _val: 'JSValue' = lib.JS_Eval(_ctx, _buf, _buf_len, _filename, eval_flags) # noqa
+    _val: _JSValue = lib.JS_Eval(_ctx, _buf, _buf_len, _filename, eval_flags)
     return _val
 
 
-def convert_jsvalue_to_pystr(_ctx: 'JSContext*', _val: 'JSValue') -> str: # noqa
-    _c_str: 'char*' = _JS_ToCString(_ctx, _val) # noqa
+def convert_jsvalue_to_pystr(_ctx: _JSContext_P, _val: _JSValue) -> str:
+    _c_str: _char_p = _JS_ToCString(_ctx, _val)
     val: bytes = ffi.string(_c_str)
     val: str = val.decode()
     lib.JS_FreeCString(_ctx, _c_str)
     return val
 
 
-def stringify_object(_ctx: 'JSContext*', _obj: 'JSValue') -> str: # noqa
-    _this: 'JSValue' = lib.JS_GetGlobalObject(_ctx) # noqa
+def stringify_object(_ctx: _JSContext_P, _obj: _JSValue) -> str:
+    _this: _JSValue = lib.JS_GetGlobalObject(_ctx)
     _func = lib.JS_GetPropertyStr(_ctx, _this, b'__stringifyObject')
     jsargs_len = 1
-    _jsargs: 'JSValue*' = ffi.new('JSValue[]', [_obj]) # noqa
+    _jsargs: _JSValue_P = ffi.new('JSValue[]', [_obj])
 
     _val = lib.JS_Call(_ctx, _func, _this, jsargs_len, _jsargs)
     val = convert_jsvalue_to_pystr(_ctx, _val)
@@ -154,7 +164,7 @@ def stringify_object(_ctx: 'JSContext*', _obj: 'JSValue') -> str: # noqa
     return val
 
 
-def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # noqa
+def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
     is_exception: bool = lib._inline_JS_IsException(_val)
 
     if is_exception:
@@ -216,15 +226,15 @@ def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # no
     return val
 
 
-def convert_pyargs_to_jsargs(_ctx: 'JSContext*', pyargs: list[Any]) -> (int, 'JSValue'): # noqa
-    _filename: 'char*' = ffi.cast('char*', 0) # noqa
+def convert_pyargs_to_jsargs(_ctx: _JSContext_P, pyargs: list[Any]) -> (int, _JSValue):
+    _filename: _char_p = ffi.cast(_char_p, 0)
     val_length = len(pyargs)
     _val = [convert_pyvalue_to_jsvalue(_ctx, n) for n in pyargs]
     _val = ffi.new('JSValue[]', _val)
     return val_length, _val
 
 
-def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noqa
+def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
     if val is None:
         _val = _JS_Eval(_ctx, 'null')
     elif isinstance(val, QJSValue):
@@ -243,8 +253,8 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
         _Array_push_atom = lib.JS_NewAtom(_ctx, b'push')
 
         for n in val:
-            _n: 'JSValue' = convert_pyvalue_to_jsvalue(_ctx, n) # noqa
-            _n_p: 'JSValue*' = ffi.new('JSValue[]', [_n]) # noqa
+            _n: _JSValue = convert_pyvalue_to_jsvalue(_ctx, n)
+            _n_p: _JSValue_P = ffi.new('JSValue[]', [_n])
 
             lib.JS_Invoke(_ctx, _val, _Array_push_atom, 1, _n_p)
 
@@ -259,16 +269,16 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
         for k, v in val.items():
             assert isinstance(k, str)
             _k: bytes = k.encode()
-            _v: 'JSValue' = convert_pyvalue_to_jsvalue(_ctx, v)
+            _v: _JSValue = convert_pyvalue_to_jsvalue(_ctx, v)
 
             lib.JS_SetPropertyStr(_ctx, _val, _k, _v)
 
             # NOTE: line below is not required based on JS_SetPropertyStr logic
             #   _JS_FreeValue(_ctx, _v)
     elif callable(val):
-        val_handler: 'void*' = ffi.new_handle(val) # noqa
+        val_handler: _void_p = ffi.new_handle(val)
         _c_temp.add(val_handler)
-        _val_handler: 'JSValue' = lib._macro_JS_MKPTR(lib.JS_TAG_OBJECT, val_handler) # noqa
+        _val_handler: _JSValue = lib._macro_JS_MKPTR(lib.JS_TAG_OBJECT, val_handler)
         # _c_temp.add(_val_handler)
 
         # val2 = QJSValue(_ctx, _val_handler)
@@ -310,8 +320,8 @@ def is_url(path_or_url: str) -> bool:
 # typedef JSValue JSCFunctionData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data);
 @ffi.def_extern()
 def _quikcjs_cffi_py_func_wrap(_ctx, _this_val, _argc, _argv, _magic, _func_data):
-    _val_handler: 'JSValue' = _func_data[0] # noqa
-    _val_p: 'void*' = JS_VALUE_GET_PTR(_val_handler) # noqa
+    _val_handler: _JSValue = _func_data[0]
+    _val_p: _void_p = JS_VALUE_GET_PTR(_val_handler)
     val_handler = ffi.from_handle(_val_p)
     py_func = val_handler
 
@@ -326,7 +336,7 @@ def _quikcjs_cffi_py_func_wrap(_ctx, _this_val, _argc, _argv, _magic, _func_data
 
 
 class QJSValue:
-    def __init__(self, _ctx: 'JSContext*', _val: 'JSValue'=None): # noqa
+    def __init__(self, _ctx: _JSContext_P, _val: _JSValue=None):
         self._ctx = _ctx
         self._val = _val
 
@@ -398,7 +408,7 @@ class QJSObject(QJSValue):
 
 
 class QJSFunction(QJSValue):
-    def __init__(self, _ctx: 'JSContext*', _val: 'JSValue'=None, _this: 'JSValue'=None): # noqa
+    def __init__(self, _ctx: _JSContext_P, _val: _JSValue=None, _this: _JSValue=None):
         self._ctx = _ctx
         self._val = _val # _func
         self._this = _this if _this else lib.JS_GetGlobalObject(_ctx)
@@ -440,7 +450,7 @@ class QJSFunction(QJSValue):
 
 
 class QJSError(QJSValue, Exception):
-    def __init__(self, _ctx: 'JSContext*', _val: 'JSValue', verbose: bool=False): # noqa
+    def __init__(self, _ctx: _JSContext_P, _val: _JSValue, verbose: bool=False):
         self._ctx = _ctx
         self._val = _val
         self.verbose = verbose
@@ -451,7 +461,7 @@ class QJSError(QJSValue, Exception):
 
     def __repr__(self) -> str:
         _ctx = self._ctx
-        _val: 'JSValue' = self._val # noqa
+        _val: _JSValue = self._val
 
         is_error = lib.JS_IsError(_ctx, _val)
 
@@ -506,7 +516,7 @@ class QJSRuntime:
 
 
 class QJSContext:
-    c_to_py_context_map: dict['Context*', 'QJSContext'] = {} # noqa
+    c_to_py_context_map: dict[_JSContext_P, 'QJSContext'] = {}
 
 
     def __init__(self, rt: QJSRuntime):
@@ -515,7 +525,7 @@ class QJSContext:
         rt.add_qjscontext(self)
         QJSContext.set_qjscontext(_ctx, self)
         self.qjsvalues: WeakSet[QJSValue] = WeakSet()
-        self.cffi_handle_rc: dict['void*', int] = {} # noqa
+        self.cffi_handle_rc: dict[_void_p, int] = {}
         lib.JS_AddIntrinsicBigFloat(_ctx)
         lib.JS_AddIntrinsicBigDecimal(_ctx)
         lib.JS_AddIntrinsicOperators(_ctx)
@@ -573,7 +583,7 @@ class QJSContext:
         globalThis.__stringifyObject = stringifyObject;
         '''
 
-        _val: 'JSValue' = _JS_Eval(_ctx, code) # noqa
+        _val: _JSValue = _JS_Eval(_ctx, code)
         _JS_FreeValue(_ctx, _val)
 
 
@@ -606,24 +616,24 @@ class QJSContext:
 
 
     @classmethod
-    def get_qjscontext(cls, _ctx: 'Context*') -> 'QJSContext':
+    def get_qjscontext(cls, _ctx: _JSContext_P) -> 'QJSContext':
         ctx = cls.c_to_py_context_map[_ctx]
         return ctx
 
 
     @classmethod
-    def set_qjscontext(cls, _ctx: 'Context*', ctx: 'QJSContext'):
+    def set_qjscontext(cls, _ctx: _JSContext_P, ctx: 'QJSContext'):
         cls.c_to_py_context_map[_ctx] = ctx
 
 
     @classmethod
-    def del_qjscontext(cls, _ctx: 'Context*'):
+    def del_qjscontext(cls, _ctx: _JSContext_P):
         del cls.c_to_py_context_map[_ctx]
 
 
     def get(self, key: str) -> Any:
         _ctx = self._ctx
-        _this: 'JSValue' = lib.JS_GetGlobalObject(_ctx) # noqa
+        _this: _JSValue = lib.JS_GetGlobalObject(_ctx)
         _key = key.encode()
 
         _val = lib.JS_GetPropertyStr(_ctx, _this, _key)
@@ -640,7 +650,7 @@ class QJSContext:
 
     def set(self, key: str, val: Any):
         _ctx = self._ctx
-        _this: 'JSValue' = lib.JS_GetGlobalObject(_ctx) # noqa
+        _this: _JSValue = lib.JS_GetGlobalObject(_ctx)
         _key = key.encode()
         _val = convert_pyvalue_to_jsvalue(_ctx, val)
 
@@ -653,7 +663,7 @@ class QJSContext:
 
     def eval(self, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
         _ctx = self._ctx
-        _val: 'JSValue' = _JS_Eval(_ctx, buf, filename, eval_flags) # noqa
+        _val: _JSValue = _JS_Eval(_ctx, buf, filename, eval_flags)
         # if JS_VALUE_HAS_REF_COUNT(_val): print('*** [0]', JS_VALUE_GET_REF_COUNT(_val))
         val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
 
