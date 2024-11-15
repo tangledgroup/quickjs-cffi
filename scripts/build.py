@@ -36,27 +36,6 @@ def add_prefix_to_function(func_signature: str, prefix: str) -> str:
     return re.sub(pattern, replacer, func_signature, flags=re.VERBOSE)
 
 
-'''
-def add_prefix_to_macro(macros):
-    output = []
-
-    for match in macro_pattern.finditer(macros):
-        macro_name = match.group(1)
-        params = match.group(2).strip()
-        expression = match.group(3).strip()
-
-        # Convert macro to function definition
-        function_name = f"__macro_{macro_name}"
-        param_list = ', '.join([f"{param.strip()}" for param in params.split(',')])
-
-        # Formatting the converted function
-        function_def = f"inline int {function_name}({param_list}) {{\n    return {expression};\n}}\n"
-        output.append(function_def)
-
-    return '\n'.join(output)
-'''
-
-
 def get_func_declarations(source_code: str) -> list[str]:
     def remove_comments(code: str) -> str:
         # Remove multi-line comments
@@ -111,7 +90,7 @@ def get_func_declarations(source_code: str) -> list[str]:
 
             # Get everything before the function name to extract return type
             func_start = code[i:].find(match.group(1), match.start())
-            return_type = code[i+match.start():i+func_start].strip()
+            return_type = code[start:i + func_start].strip()
 
             # If we found an opening brace, find its matching closing brace
             if code[end-1] == '{':
@@ -231,7 +210,7 @@ def build_quickjs_repo(*args, **kwargs):
 
             line = line[len('static inline '):]
             # print('! ', line)
-            line = add_prefix_to_function(line, '_inlined_')
+            line = add_prefix_to_function(line, '_inline_')
             # print('!!', line)
             _inline_static_source.append(line)
             continue
@@ -273,7 +252,7 @@ def build_quickjs_repo(*args, **kwargs):
 
     extern "Python" JSValue _quikcjs_cffi_py_func_wrap(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data);
 
-    JSValue _quikcjs_cffi_JS_MKPTR(int64_t tag, void *p);
+    JSValue _macro_JS_MKPTR(int64_t tag, void *p);
     '''
 
     # print code
@@ -287,7 +266,7 @@ def build_quickjs_repo(*args, **kwargs):
         '_quickjs',
         '''#include "../_quickjs_lib.h"
 
-        JSValue _quikcjs_cffi_JS_MKPTR(int64_t tag, void *p) {
+        JSValue _macro_JS_MKPTR(int64_t tag, void *p) {
             return JS_MKPTR(tag, p);
         }
 

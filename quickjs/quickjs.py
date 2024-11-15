@@ -18,7 +18,6 @@ __all__ = [
 import os
 import re
 import json
-import time
 import inspect
 import tempfile
 import urllib.request
@@ -116,11 +115,11 @@ def JS_VALUE_GET_REF_COUNT(v: 'JSValue') -> int: # noqa
 
 
 def _JS_ToCString(_ctx: 'JSContext*', _val: 'JSValue') -> 'char*': # noqa
-    return lib._inlined_JS_ToCString(_ctx, _val)
+    return lib._inline_JS_ToCString(_ctx, _val)
 
 
 def _JS_FreeValue(_ctx: 'JSContext*', _val: 'JSValue'): # noqa
-    lib._inlined_JS_FreeValue(_ctx, _val)
+    lib._inline_JS_FreeValue(_ctx, _val)
 
 
 def _JS_Eval(_ctx: 'JSContext*', buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any: # noqa
@@ -156,7 +155,7 @@ def stringify_object(_ctx: 'JSContext*', _obj: 'JSValue') -> str: # noqa
 
 
 def convert_jsvalue_to_pyvalue(_ctx: 'JSContext*', _val: 'JSValue') -> Any: # noqa
-    is_exception: bool = lib._inlined_JS_IsException(_val)
+    is_exception: bool = lib._inline_JS_IsException(_val)
 
     if is_exception:
         _e_val = lib.JS_GetException(_ctx)
@@ -269,7 +268,7 @@ def convert_pyvalue_to_jsvalue(_ctx: 'JSContext*', val: Any) -> 'JSValue': # noq
     elif callable(val):
         val_handler: 'void*' = ffi.new_handle(val) # noqa
         _c_temp.add(val_handler)
-        _val_handler: 'JSValue' = lib._quikcjs_cffi_JS_MKPTR(lib.JS_TAG_OBJECT, val_handler) # noqa
+        _val_handler: 'JSValue' = lib._macro_JS_MKPTR(lib.JS_TAG_OBJECT, val_handler) # noqa
         # _c_temp.add(_val_handler)
 
         # val2 = QJSValue(_ctx, _val_handler)
