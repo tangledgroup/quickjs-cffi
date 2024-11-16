@@ -114,6 +114,19 @@ JS_EVAL_FLAG_BACKTRACE_BARRIER = 1 << 6
 JS_EVAL_FLAG_ASYNC = 1 << 7
 
 
+class JSEval(Enum):
+    TYPE_GLOBAL = JS_EVAL_TYPE_GLOBAL
+    TYPE_MODULE = JS_EVAL_TYPE_MODULE
+    TYPE_DIRECT = JS_EVAL_TYPE_DIRECT
+    TYPE_INDIRECT = JS_EVAL_TYPE_INDIRECT
+    TYPE_MASK = JS_EVAL_TYPE_MASK
+    FLAG_STRICT = JS_EVAL_FLAG_STRICT
+    FLAG_STRIP = JS_EVAL_FLAG_STRIP
+    FLAG_COMPILE_ONLY = JS_EVAL_FLAG_COMPILE_ONLY
+    FLAG_BACKTRACE_BARRIER = JS_EVAL_FLAG_BACKTRACE_BARRIER
+    FLAG_ASYNC = JS_EVAL_FLAG_ASYNC
+
+
 def _JS_ToCString(_ctx: _JSContext_P, _val: _JSValue) -> _char_p:
     return lib._inline_JS_ToCString(_ctx, _val)
 
@@ -393,7 +406,6 @@ class JSSymbol(JSValue):
         val = f'Symbol({val})'
         lib.JS_FreeCString(_ctx, _c_str)
         lib.JS_FreeAtom(_ctx, _atom)
-        # return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {val}>'
         return f'<{self.__class__.__name__} at {hex(id(self))} tag={tag.name} {val=}>'
 
 
@@ -662,13 +674,13 @@ class JSContext:
     def eval(self, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
         _ctx = self._ctx
         _val: _JSValue = _JS_Eval(_ctx, buf, filename, eval_flags)
-        if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [0]', lib._macro_JS_VALUE_GET_REF_COUNT(_val))
+        # if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [0]', lib._macro_JS_VALUE_GET_REF_COUNT(_val))
         val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
 
         if isinstance(val, JSValue):
-            if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [1]', lib._macro_JS_VALUE_GET_REF_COUNT(val._val))
+            # if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [1]', lib._macro_JS_VALUE_GET_REF_COUNT(val._val))
             self.add_qjsvalue(val)
-            if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [2]', lib._macro_JS_VALUE_GET_REF_COUNT(val._val))
+            # if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [2]', lib._macro_JS_VALUE_GET_REF_COUNT(val._val))
 
         else:
             _JS_FreeValue(_ctx, _val)

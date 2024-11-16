@@ -9,6 +9,9 @@ def demo1():
     rt = JSRuntime()
     ctx: JSContext = rt.new_context()
 
+    val = ctx.eval('undefined')
+    print(val, type(val))
+
     val = ctx.eval('null')
     print(val, type(val))
 
@@ -43,6 +46,9 @@ def demo1():
     print(val, type(val))
 
     val = ctx.eval('var b = [1, 2.0, "3"].map(n => n * 2); b')
+    print(val, type(val))
+
+    val = ctx.eval('[].map')
     print(val, type(val))
 
     try:
