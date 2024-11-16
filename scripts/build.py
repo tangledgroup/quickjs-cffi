@@ -252,7 +252,20 @@ def build_quickjs_repo(*args, **kwargs):
 
     extern "Python" JSValue _quikcjs_cffi_py_func_wrap(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data);
 
+    int _macro_JS_VALUE_GET_TAG(JSValue v);
+    int _macro_JS_VALUE_GET_NORM_TAG(JSValue v);
+    int _macro_JS_VALUE_GET_INT(JSValue v);
+    int _macro_JS_VALUE_GET_BOOL(JSValue v);
+    double _macro_JS_VALUE_GET_FLOAT64(JSValue v);
+    void *_macro_JS_VALUE_GET_PTR(JSValue v);
+
+    JSValue _macro_JS_MKVAL(int64_t tag, int32_t val);
     JSValue _macro_JS_MKPTR(int64_t tag, void *p);
+
+    JSObject *_macro_JS_VALUE_GET_OBJ(JSValue v);
+    // void *_macro_JS_VALUE_GET_STRING(JSValue v); /* return is JSString* */
+    int _macro_JS_VALUE_HAS_REF_COUNT(JSValue v);
+    int _macro_JS_VALUE_GET_REF_COUNT(JSValue v);
     '''
 
     # print code
@@ -266,9 +279,20 @@ def build_quickjs_repo(*args, **kwargs):
         '_quickjs',
         '''#include "../_quickjs_lib.h"
 
-        JSValue _macro_JS_MKPTR(int64_t tag, void *p) {
-            return JS_MKPTR(tag, p);
-        }
+        int _macro_JS_VALUE_GET_TAG(JSValue v) { return JS_VALUE_GET_TAG(v); }
+        int _macro_JS_VALUE_GET_NORM_TAG(JSValue v) { return JS_VALUE_GET_NORM_TAG(v); }
+        int _macro_JS_VALUE_GET_INT(JSValue v) { return JS_VALUE_GET_INT(v); }
+        int _macro_JS_VALUE_GET_BOOL(JSValue v) { return JS_VALUE_GET_BOOL(v); }
+        double _macro_JS_VALUE_GET_FLOAT64(JSValue v) { return JS_VALUE_GET_FLOAT64(v); }
+        void *_macro_JS_VALUE_GET_PTR(JSValue v) { return JS_VALUE_GET_PTR(v); }
+
+        JSValue _macro_JS_MKVAL(int64_t tag, int32_t val) { return JS_MKVAL(tag, val); }
+        JSValue _macro_JS_MKPTR(int64_t tag, void *p) { return JS_MKPTR(tag, p); }
+
+        JSObject *_macro_JS_VALUE_GET_OBJ(JSValue v) { return JS_VALUE_GET_OBJ(v); }
+        // void *_macro_JS_VALUE_GET_STRING(JSValue v) { return JS_VALUE_GET_STRING(v); }
+        int _macro_JS_VALUE_HAS_REF_COUNT(JSValue v) { return JS_VALUE_HAS_REF_COUNT(v); }
+        int _macro_JS_VALUE_GET_REF_COUNT(JSValue v) { return ((JSRefCountHeader*)JS_VALUE_GET_PTR(v))->ref_count; } /* quickjs-cffi */
 
         ''' + _inline_static_source,
         libraries=['m', 'dl', 'pthread'],

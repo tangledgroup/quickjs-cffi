@@ -72,58 +72,6 @@ JS_EVAL_FLAG_BACKTRACE_BARRIER = 1 << 6
 JS_EVAL_FLAG_ASYNC = 1 << 7
 
 
-def JS_VALUE_GET_TAG(v: _JSValue) -> int:
-    #define JS_VALUE_GET_TAG(v) (int)((uintptr_t)(v) & 0xf)
-    return v.tag & 0xf
-
-
-def JS_VALUE_GET_NORM_TAG(v: _JSValue) -> int:
-    # /* same as JS_VALUE_GET_TAG, but return JS_TAG_FLOAT64 with NaN boxing */
-    #define JS_VALUE_GET_NORM_TAG(v) JS_VALUE_GET_TAG(v)
-    return JS_VALUE_GET_TAG(v)
-
-
-def JS_VALUE_GET_INT(v: _JSValue) -> int:
-    #define JS_VALUE_GET_INT(v) (int)((intptr_t)(v) >> 4)
-    return v.u.int32
-
-
-def JS_VALUE_GET_BOOL(v: _JSValue) -> bool:
-    #define JS_VALUE_GET_BOOL(v) JS_VALUE_GET_INT(v)
-    return bool(v.u.int32)
-
-
-def JS_VALUE_GET_FLOAT64(v: _JSValue) -> float:
-    #define JS_VALUE_GET_FLOAT64(v) (double)JS_VALUE_GET_INT(v)
-    return v.u.float64
-
-
-def JS_VALUE_GET_PTR(v: _JSValue) -> _void_p:
-    #define JS_VALUE_GET_PTR(v) (void *)((intptr_t)(v) & ~0xf)
-    return v.u.ptr
-
-
-def JS_VALUE_GET_OBJ(v: _JSValue) -> _JSObject_P:
-    #define JS_VALUE_GET_OBJ(v) ((JSObject *)JS_VALUE_GET_PTR(v))
-    return ffi.cast('JSObject*', JS_VALUE_GET_PTR(v))
-
-
-def JS_VALUE_GET_STRING(v: _JSValue) -> _JSString_P:
-    #define JS_VALUE_GET_STRING(v) ((JSString *)JS_VALUE_GET_PTR(v))
-    return ffi.cast('JSString*', JS_VALUE_GET_PTR(v))
-
-
-def JS_VALUE_HAS_REF_COUNT(v: _JSValue) -> bool:
-    #define JS_VALUE_HAS_REF_COUNT(v) ((unsigned)JS_VALUE_GET_TAG(v) >= (unsigned)JS_TAG_FIRST)
-    return abs(JS_VALUE_GET_TAG(v)) >= abs(lib.JS_TAG_FIRST)
-
-
-def JS_VALUE_GET_REF_COUNT(v: _JSValue) -> int:
-    _v_p: _void_p = JS_VALUE_GET_PTR(v)
-    _rfh_p: 'JSRefCountHeader*' = ffi.cast('JSRefCountHeader *', _v_p)
-    return _rfh_p.ref_count
-
-
 def _JS_ToCString(_ctx: _JSContext_P, _val: _JSValue) -> _char_p:
     return lib._inline_JS_ToCString(_ctx, _val)
 
@@ -198,10 +146,10 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
         else:
             val = QJSObject(_ctx, _val) # Object, Map, Set, etc
     elif _val.tag == lib.JS_TAG_INT:
-        val = JS_VALUE_GET_INT(_val)
+        val = lib._macro_JS_VALUE_GET_INT(_val)
         _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_BOOL:
-        val = JS_VALUE_GET_BOOL(_val)
+        val = lib._macro_JS_VALUE_GET_BOOL(_val)
         _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_NULL:
         val = None
@@ -217,7 +165,7 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
         # FIXME: handle exception
         raise NotImplementedError('JS_TAG_EXCEPTION')
     elif _val.tag == lib.JS_TAG_FLOAT64:
-        val = JS_VALUE_GET_FLOAT64(_val)
+        val = lib._macro_JS_VALUE_GET_FLOAT64(_val)
         _JS_FreeValue(_ctx, _val)
     else:
         _JS_FreeValue(_ctx, _val)
@@ -321,7 +269,7 @@ def is_url(path_or_url: str) -> bool:
 @ffi.def_extern()
 def _quikcjs_cffi_py_func_wrap(_ctx, _this_val, _argc, _argv, _magic, _func_data):
     _val_handler: _JSValue = _func_data[0]
-    _val_p: _void_p = JS_VALUE_GET_PTR(_val_handler)
+    _val_p: _void_p = lib._macro_JS_VALUE_GET_PTR(_val_handler)
     val_handler = ffi.from_handle(_val_p)
     py_func = val_handler
 
@@ -664,13 +612,13 @@ class QJSContext:
     def eval(self, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
         _ctx = self._ctx
         _val: _JSValue = _JS_Eval(_ctx, buf, filename, eval_flags)
-        # if JS_VALUE_HAS_REF_COUNT(_val): print('*** [0]', JS_VALUE_GET_REF_COUNT(_val))
+        if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [0]', lib._macro_JS_VALUE_GET_REF_COUNT(_val))
         val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
 
         if isinstance(val, QJSValue):
-            # if JS_VALUE_HAS_REF_COUNT(_val): print('*** [1]', JS_VALUE_GET_REF_COUNT(val._val))
+            if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [1]', lib._macro_JS_VALUE_GET_REF_COUNT(val._val))
             self.add_qjsvalue(val)
-            # if JS_VALUE_HAS_REF_COUNT(_val): print('*** [2]', JS_VALUE_GET_REF_COUNT(val._val))
+            if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [2]', lib._macro_JS_VALUE_GET_REF_COUNT(val._val))
 
         else:
             _JS_FreeValue(_ctx, _val)
