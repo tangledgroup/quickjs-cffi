@@ -10,9 +10,9 @@ __all__ = [
     'JS_EVAL_FLAG_BACKTRACE_BARRIER',
     'JS_EVAL_FLAG_ASYNC',
 
-    'QJSRuntime',
-    'QJSContext',
-    'QJSError',
+    'JSRuntime',
+    'JSContext',
+    'JSError',
 ]
 
 import os
@@ -21,6 +21,7 @@ import json
 import inspect
 import tempfile
 import urllib.request
+from enum import Enum
 from weakref import WeakSet
 from typing import Any, NewType
 
@@ -41,6 +42,47 @@ _c_temp: set[Any] = set()
 
 # Regular expression pattern to match URLs
 url_pattern = re.compile(r'^(?:http|ftp|https)://')
+
+# /* all tags with a reference count are negative */
+JS_TAG_FIRST       = -11 # /* first negative tag */
+JS_TAG_BIG_DECIMAL = -11
+JS_TAG_BIG_INT     = -10
+JS_TAG_BIG_FLOAT   = -9
+JS_TAG_SYMBOL      = -8
+JS_TAG_STRING      = -7
+JS_TAG_MODULE      = -3 # /* used internally */
+JS_TAG_FUNCTION_BYTECODE = -2 # /* used internally */
+JS_TAG_OBJECT      = -1
+JS_TAG_INT         = 0
+JS_TAG_BOOL        = 1
+JS_TAG_NULL        = 2
+JS_TAG_UNDEFINED   = 3
+JS_TAG_UNINITIALIZED = 4
+JS_TAG_CATCH_OFFSET = 5
+JS_TAG_EXCEPTION   = 6
+JS_TAG_FLOAT64     = 7
+# /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+
+
+class JSTag(Enum):
+    FIRST = JS_TAG_FIRST
+    BIG_DECIMAL = JS_TAG_BIG_DECIMAL
+    BIG_INT = JS_TAG_BIG_INT
+    BIG_FLOAT = JS_TAG_BIG_FLOAT
+    SYMBOL = JS_TAG_SYMBOL
+    STRING = JS_TAG_STRING
+    MODULE = JS_TAG_MODULE
+    FUNCTION_BYTECODE = JS_TAG_FUNCTION_BYTECODE
+    OBJECT = JS_TAG_OBJECT
+    INT = JS_TAG_INT
+    BOOL = JS_TAG_BOOL
+    NULL = JS_TAG_NULL
+    UNDEFINED = JS_TAG_UNDEFINED
+    UNINITIALIZED = JS_TAG_UNINITIALIZED
+    CATCH_OFFSET = JS_TAG_CATCH_OFFSET
+    EXCEPTION = JS_TAG_EXCEPTION
+    FLOAT64 = JS_TAG_FLOAT64
+
 
 # /* JS_Eval() flags */
 #define JS_EVAL_TYPE_GLOBAL   (0 << 0) /* global code (default) */
@@ -118,7 +160,7 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
     if is_exception:
         _e_val = lib.JS_GetException(_ctx)
         _JS_FreeValue(_ctx, _val)
-        e = QJSError(_ctx, _e_val)
+        e = JSError(_ctx, _e_val)
         raise e
 
     if _val.tag == lib.JS_TAG_FIRST:
@@ -131,20 +173,20 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
     elif _val.tag == lib.JS_TAG_BIG_FLOAT:
         raise NotImplementedError('JS_TAG_BIG_FLOAT')
     elif _val.tag == lib.JS_TAG_SYMBOL:
-        val = QJSSymbol(_ctx, _val)
+        val = JSSymbol(_ctx, _val)
     elif _val.tag == lib.JS_TAG_STRING:
-        val = QJSString(_ctx, _val)
+        val = JSString(_ctx, _val)
     elif _val.tag == lib.JS_TAG_MODULE:
         raise NotImplementedError('JS_TAG_MODULE')
     elif _val.tag == lib.JS_TAG_FUNCTION_BYTECODE:
         raise NotImplementedError('JS_TAG_FUNCTION_BYTECODE')
     elif _val.tag == lib.JS_TAG_OBJECT:
         if lib.JS_IsFunction(_ctx, _val):
-            val = QJSFunction(_ctx, _val, None)
+            val = JSFunction(_ctx, _val, None)
         elif lib.JS_IsArray(_ctx, _val):
-            val = QJSArray(_ctx, _val)
+            val = JSArray(_ctx, _val)
         else:
-            val = QJSObject(_ctx, _val) # Object, Map, Set, etc
+            val = JSObject(_ctx, _val) # Object, Map, Set, etc
     elif _val.tag == lib.JS_TAG_INT:
         val = lib._macro_JS_VALUE_GET_INT(_val)
         _JS_FreeValue(_ctx, _val)
@@ -185,7 +227,7 @@ def convert_pyargs_to_jsargs(_ctx: _JSContext_P, pyargs: list[Any]) -> (int, _JS
 def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
     if val is None:
         _val = _JS_Eval(_ctx, 'null')
-    elif isinstance(val, QJSValue):
+    elif isinstance(val, JSValue):
         _val = val._val
     elif isinstance(val, bool):
         _val = _JS_Eval(_ctx, json.dumps(val))
@@ -197,7 +239,7 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
         _val = _JS_Eval(_ctx, json.dumps(val))
     elif isinstance(val, (list, tuple)):
         _val = lib.JS_NewArray(_ctx)
-        val2 = QJSValue(_ctx, _val)
+        val2 = JSValue(_ctx, _val)
         _Array_push_atom = lib.JS_NewAtom(_ctx, b'push')
 
         for n in val:
@@ -212,7 +254,7 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
         lib.JS_FreeAtom(_ctx, _Array_push_atom)
     elif isinstance(val, dict):
         _val = lib.JS_NewObject(_ctx)
-        val2 = QJSValue(_ctx, _val)
+        val2 = JSValue(_ctx, _val)
 
         for k, v in val.items():
             assert isinstance(k, str)
@@ -229,7 +271,7 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
         _val_handler: _JSValue = lib._macro_JS_MKPTR(lib.JS_TAG_OBJECT, val_handler)
         # _c_temp.add(_val_handler)
 
-        # val2 = QJSValue(_ctx, _val_handler)
+        # val2 = JSValue(_ctx, _val_handler)
 
         _func = lib._quikcjs_cffi_py_func_wrap
         _length = len(inspect.signature(val).parameters)
@@ -239,7 +281,7 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
         # _data = ffi.new('JSValue[]', [_val_handler])
         _val = lib.JS_NewCFunctionData(_ctx, _func, _length, _magic, _data_len, _data)
 
-        # val2 = QJSValue(_ctx, _val)
+        # val2 = JSValue(_ctx, _val)
     else:
         raise ValueError(f'Unsupported Python value {type(val)}')
 
@@ -283,12 +325,12 @@ def _quikcjs_cffi_py_func_wrap(_ctx, _this_val, _argc, _argv, _magic, _func_data
     return _ret
 
 
-class QJSValue:
+class JSValue:
     def __init__(self, _ctx: _JSContext_P, _val: _JSValue=None):
         self._ctx = _ctx
         self._val = _val
 
-        ctx = QJSContext.get_qjscontext(_ctx)
+        ctx = JSContext.get_qjscontext(_ctx)
         ctx.add_qjsvalue(self)
 
 
@@ -307,8 +349,13 @@ class QJSValue:
     def __repr__(self) -> str:
         _ctx = self._ctx
         _val = self._val
+        tag = JSTag(_val.tag)
         val: str = stringify_object(_ctx, _val)
-        return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {val}>'
+
+        if lib._macro_JS_VALUE_HAS_REF_COUNT(_val):
+            return f'<{self.__class__.__name__} at {hex(id(self))} tag={tag.name} ptr={_val.u.ptr} {val=}>'
+        else:
+            return f'<{self.__class__.__name__} at {hex(id(self))} tag={tag.name} {val=}>'
 
 
     def __getattr__(self, attr: str) -> Any:
@@ -318,7 +365,7 @@ class QJSValue:
         _ret = lib.JS_GetPropertyStr(_ctx, _val, _c_attr)
         ret: Any = convert_jsvalue_to_pyvalue(_ctx, _ret)
 
-        # if isinstance(ret, QJSValue):
+        # if isinstance(ret, JSValue):
         #     pass
         # else:
         #     _JS_FreeValue(_ctx, _ret)
@@ -328,14 +375,16 @@ class QJSValue:
 
 
 
-class QJSString(QJSValue):
+class JSString(JSValue):
     pass
 
 
-class QJSSymbol(QJSValue):
+class JSSymbol(JSValue):
     def __repr__(self) -> str:
         _ctx = self._ctx
         _val = self._val
+
+        tag = JSTag(_val.tag)
 
         _atom = lib.JS_ValueToAtom(_ctx, _val)
         _c_str = lib.JS_AtomToCString(_ctx, _atom)
@@ -344,24 +393,25 @@ class QJSSymbol(QJSValue):
         val = f'Symbol({val})'
         lib.JS_FreeCString(_ctx, _c_str)
         lib.JS_FreeAtom(_ctx, _atom)
-        return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {val}>'
+        # return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {val}>'
+        return f'<{self.__class__.__name__} at {hex(id(self))} tag={tag.name} {val=}>'
 
 
-class QJSArray(QJSValue):
+class JSArray(JSValue):
     pass
 
 
-class QJSObject(QJSValue):
+class JSObject(JSValue):
     pass
 
 
-class QJSFunction(QJSValue):
+class JSFunction(JSValue):
     def __init__(self, _ctx: _JSContext_P, _val: _JSValue=None, _this: _JSValue=None):
         self._ctx = _ctx
         self._val = _val # _func
         self._this = _this if _this else lib.JS_GetGlobalObject(_ctx)
 
-        ctx = QJSContext.get_qjscontext(_ctx)
+        ctx = JSContext.get_qjscontext(_ctx)
         ctx.add_qjsvalue(self)
 
 
@@ -381,7 +431,7 @@ class QJSFunction(QJSValue):
         ret = convert_jsvalue_to_pyvalue(_ctx, _ret)
         ffi.release(_jsargs)
 
-        # if isinstance(ret, QJSValue):
+        # if isinstance(ret, JSValue):
         #     pass
         # else:
         #     _JS_FreeValue(_ctx, _ret)
@@ -397,13 +447,13 @@ class QJSFunction(QJSValue):
         _JS_FreeValue(_ctx, _this)
 
 
-class QJSError(QJSValue, Exception):
+class JSError(JSValue, Exception):
     def __init__(self, _ctx: _JSContext_P, _val: _JSValue, verbose: bool=False):
         self._ctx = _ctx
         self._val = _val
         self.verbose = verbose
 
-        ctx = QJSContext.get_qjscontext(_ctx)
+        ctx = JSContext.get_qjscontext(_ctx)
         ctx.add_qjsvalue(self)
 
 
@@ -424,10 +474,10 @@ class QJSError(QJSValue, Exception):
             return f'<{self.__class__.__name__} at {hex(id(self))} {val!r}>'
 
 
-class QJSRuntime:
+class JSRuntime:
     def __init__(self):
         self._rt = lib.JS_NewRuntime()
-        self.ctxs: WeakSet['QJSContext'] = WeakSet()
+        self.ctxs: WeakSet['JSContext'] = WeakSet()
         lib.js_std_init_handlers(self._rt)
 
         lib.JS_SetModuleLoaderFunc(
@@ -450,29 +500,29 @@ class QJSRuntime:
     free = __del__
 
 
-    def new_context(self) -> 'QJSContext':
-        ctx = QJSContext(self)
+    def new_context(self) -> 'JSContext':
+        ctx = JSContext(self)
         return ctx
 
 
-    def add_qjscontext(self, ctx: 'QJSContext'):
+    def add_qjscontext(self, ctx: 'JSContext'):
         self.ctxs.add(ctx)
 
 
-    def del_qjscontext(self, ctx: 'QJSContext'):
+    def del_qjscontext(self, ctx: 'JSContext'):
         self.ctxs.discard(ctx)
 
 
-class QJSContext:
-    c_to_py_context_map: dict[_JSContext_P, 'QJSContext'] = {}
+class JSContext:
+    c_to_py_context_map: dict[_JSContext_P, 'JSContext'] = {}
 
 
-    def __init__(self, rt: QJSRuntime):
+    def __init__(self, rt: JSRuntime):
         self.rt = rt
         self._ctx = _ctx = lib.JS_NewContext(self.rt._rt)
         rt.add_qjscontext(self)
-        QJSContext.set_qjscontext(_ctx, self)
-        self.qjsvalues: WeakSet[QJSValue] = WeakSet()
+        JSContext.set_qjscontext(_ctx, self)
+        self.qjsvalues: WeakSet[JSValue] = WeakSet()
         self.cffi_handle_rc: dict[_void_p, int] = {}
         lib.JS_AddIntrinsicBigFloat(_ctx)
         lib.JS_AddIntrinsicBigDecimal(_ctx)
@@ -544,7 +594,7 @@ class QJSContext:
         self.qjsvalues = None
         self._ctx = None
         self.rt.del_qjscontext(self)
-        QJSContext.del_qjscontext(_ctx)
+        JSContext.del_qjscontext(_ctx)
         lib.JS_FreeContext(_ctx)
 
 
@@ -559,18 +609,18 @@ class QJSContext:
         self.set(key, value)
 
 
-    def add_qjsvalue(self, js_value: QJSValue):
+    def add_qjsvalue(self, js_value: JSValue):
         self.qjsvalues.add(js_value)
 
 
     @classmethod
-    def get_qjscontext(cls, _ctx: _JSContext_P) -> 'QJSContext':
+    def get_qjscontext(cls, _ctx: _JSContext_P) -> 'JSContext':
         ctx = cls.c_to_py_context_map[_ctx]
         return ctx
 
 
     @classmethod
-    def set_qjscontext(cls, _ctx: _JSContext_P, ctx: 'QJSContext'):
+    def set_qjscontext(cls, _ctx: _JSContext_P, ctx: 'JSContext'):
         cls.c_to_py_context_map[_ctx] = ctx
 
 
@@ -587,7 +637,7 @@ class QJSContext:
         _val = lib.JS_GetPropertyStr(_ctx, _this, _key)
         val = convert_jsvalue_to_pyvalue(_ctx, _val)
 
-        if isinstance(val, QJSValue):
+        if isinstance(val, JSValue):
             self.add_qjsvalue(val)
         else:
             _JS_FreeValue(_ctx, _val)
@@ -615,7 +665,7 @@ class QJSContext:
         if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [0]', lib._macro_JS_VALUE_GET_REF_COUNT(_val))
         val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
 
-        if isinstance(val, QJSValue):
+        if isinstance(val, JSValue):
             if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [1]', lib._macro_JS_VALUE_GET_REF_COUNT(val._val))
             self.add_qjsvalue(val)
             if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [2]', lib._macro_JS_VALUE_GET_REF_COUNT(val._val))

@@ -6,8 +6,8 @@ from quickjs import *
 
 
 def demo1():
-    rt = QJSRuntime()
-    ctx: QJSContext = rt.new_context()
+    rt = JSRuntime()
+    ctx: JSContext = rt.new_context()
 
     val = ctx.eval('null')
     print(val, type(val))
@@ -48,13 +48,13 @@ def demo1():
     try:
         val = ctx.eval('const a = 10;')
         print(val, type(val))
-    except QJSError as e:
-        print(f'QJSError {e = }')
+    except JSError as e:
+        print(f'JSError {e = }')
 
 
 def demo2():
-    rt = QJSRuntime()
-    ctx: QJSContext = rt.new_context()
+    rt = JSRuntime()
+    ctx: JSContext = rt.new_context()
 
     ctx.eval(r'''
         import * as std from 'std';
@@ -111,8 +111,8 @@ def demo2():
 
 
 def demo3():
-    rt = QJSRuntime()
-    ctx: QJSContext = rt.new_context()
+    rt = JSRuntime()
+    ctx: JSContext = rt.new_context()
 
     ctx.eval('''
         import * as std from 'std';
@@ -161,8 +161,8 @@ def demo3():
 
 
 def demo4():
-    rt = QJSRuntime()
-    ctx: QJSContext = rt.new_context()
+    rt = JSRuntime()
+    ctx: JSContext = rt.new_context()
 
     script_url = 'https://raw.githubusercontent.com/lodash/lodash/refs/heads/main/dist/lodash.min.js'
     ctx.load_script(script_url)
@@ -205,10 +205,10 @@ def demo4():
 def demo5():
     from tqdm import tqdm
 
-    rt = QJSRuntime()
+    rt = JSRuntime()
 
     for i in tqdm(range(1_000)):
-        ctx: QJSContext = rt.new_context()
+        ctx: JSContext = rt.new_context()
         ctx.eval('var a = 1 + 1;')
 
 
