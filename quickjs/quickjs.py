@@ -1,15 +1,6 @@
 __all__ = [
-    'JS_EVAL_TYPE_GLOBAL',
-    'JS_EVAL_TYPE_MODULE',
-    'JS_EVAL_TYPE_DIRECT',
-    'JS_EVAL_TYPE_INDIRECT',
-    'JS_EVAL_TYPE_MASK',
-    'JS_EVAL_FLAG_STRICT',
-    'JS_EVAL_FLAG_STRIP',
-    'JS_EVAL_FLAG_COMPILE_ONLY',
-    'JS_EVAL_FLAG_BACKTRACE_BARRIER',
-    'JS_EVAL_FLAG_ASYNC',
-
+    'JSTag',
+    'JSEval',
     'JSRuntime',
     'JSContext',
     'JSError',
@@ -181,8 +172,9 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
     elif _val.tag == lib.JS_TAG_BIG_DECIMAL:
         raise NotImplementedError('JS_TAG_BIG_DECIMAL')
     elif _val.tag == lib.JS_TAG_BIG_INT:
-        val: str = convert_jsvalue_to_pystr(_ctx, _val)
-        val: int = int(val)
+        # val: str = convert_jsvalue_to_pystr(_ctx, _val)
+        # val: int = int(val)
+        val = JSBigInt(_ctx, _val)
     elif _val.tag == lib.JS_TAG_BIG_FLOAT:
         raise NotImplementedError('JS_TAG_BIG_FLOAT')
     elif _val.tag == lib.JS_TAG_SYMBOL:
@@ -202,16 +194,18 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
             val = JSObject(_ctx, _val) # Object, Map, Set, etc
     elif _val.tag == lib.JS_TAG_INT:
         val = lib._macro_JS_VALUE_GET_INT(_val)
-        _JS_FreeValue(_ctx, _val)
+        # _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_BOOL:
         val = lib._macro_JS_VALUE_GET_BOOL(_val)
-        _JS_FreeValue(_ctx, _val)
+        # _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_NULL:
         val = None
-        _JS_FreeValue(_ctx, _val)
+        # _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_UNDEFINED:
-        val = None # FIXME: use special value
-        _JS_FreeValue(_ctx, _val)
+        # val = None # FIXME: use special value
+        # _JS_FreeValue(_ctx, _val)
+        val = JSUndefined(_ctx, _val)
+        # _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_UNINITIALIZED:
         raise NotImplementedError('JS_TAG_CATCH_OFFSET')
     elif _val.tag == lib.JS_TAG_CATCH_OFFSET:
@@ -221,7 +215,7 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
         raise NotImplementedError('JS_TAG_EXCEPTION')
     elif _val.tag == lib.JS_TAG_FLOAT64:
         val = lib._macro_JS_VALUE_GET_FLOAT64(_val)
-        _JS_FreeValue(_ctx, _val)
+        # _JS_FreeValue(_ctx, _val)
     else:
         _JS_FreeValue(_ctx, _val)
         raise NotImplementedError('JS_NAN_BOXING')
@@ -386,6 +380,14 @@ class JSValue:
         return ret
 
 
+
+
+class JSUndefined(JSValue):
+    pass
+
+
+class JSBigInt(JSValue):
+    pass
 
 
 class JSString(JSValue):
@@ -556,6 +558,11 @@ class JSContext:
                         return '[Circular]';
                     }
                     seen.add(obj);
+                }
+
+                // Handle BigInt
+                if (typeof obj === 'bigint') {
+                    return obj.toString(); // NOTE: 'n' at the end is not returned
                 }
 
                 // Handle non-object types

@@ -2,7 +2,7 @@ import os
 import sys
 sys.path.append('..')
 
-from quickjs import *
+from quickjs import JSEval, JSRuntime, JSContext, JSError
 
 
 def demo1():
@@ -67,7 +67,7 @@ def demo2():
         import * as os from 'os';
         globalThis.std = std;
         globalThis.os = os;
-    ''', eval_flags=JS_EVAL_TYPE_MODULE)
+    ''', eval_flags=JSEval.TYPE_MODULE)
 
     ctx.eval(r'std.puts("AAA\n");')
 
@@ -131,7 +131,7 @@ def demo3():
         }
 
         globalThis.g = g;
-    ''', eval_flags=JS_EVAL_TYPE_MODULE)
+    ''', eval_flags=JSEval.TYPE_MODULE)
 
     ctx.eval('''
         function f(x, y, z) {
