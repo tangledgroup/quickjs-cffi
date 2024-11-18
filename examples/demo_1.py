@@ -60,7 +60,7 @@ def demo1():
         val = ctx.eval('const a = 10;')
         print(val, type(val))
     except JSError as e:
-        print(f'JSError {e = }')
+        print(f'{e = }')
 
 
 if __name__ == '__main__':
