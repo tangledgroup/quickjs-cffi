@@ -193,6 +193,7 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
             val = JSFunction(_ctx, _val, None)
         elif lib.JS_IsArray(_ctx, _val):
             val = JSArray(_ctx, _val)
+            print('!!!', val)
         else:
             val = JSObject(_ctx, _val) # Object, Map, Set, etc
     elif _val.tag == lib.JS_TAG_INT:
@@ -221,7 +222,7 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
 
 
 def convert_pyargs_to_jsargs(_ctx: _JSContext_P, pyargs: list[Any]) -> (int, _JSValue):
-    # _filename: _char_p = ffi.cast('char*', 0)
+    _filename: _char_p = ffi.cast('char*', 0)
     val_length = len(pyargs)
     _val = [convert_pyvalue_to_jsvalue(_ctx, n) for n in pyargs]
     _val = ffi.new('JSValue[]', _val)
@@ -242,41 +243,6 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
         _val = lib._inline___JS_NewFloat64(_ctx, val)
     elif isinstance(val, str):
         _val = lib.JS_NewString(_ctx, val.encode())
-    # elif isinstance(val, (list, tuple)):
-    #     _val = lib.JS_NewArray(_ctx)
-    #     # print(f'[0] {lib.JS_IsArray(_ctx, _val)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_val)=}')
-    #     _Array_push_atom = lib.JS_NewAtom(_ctx, b'push')
-    #
-    #     for n in val:
-    #         # print(f'!!! {n=}')
-    #         _n: _JSValue = convert_pyvalue_to_jsvalue(_ctx, n)
-    #         _n_p: _JSValue_P = ffi.new('JSValue[]', [_n])
-    #         # print(f'{_n=} {lib.JS_IsArray(_ctx, _n)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_n)=}')
-    #
-    #         lib.JS_Invoke(_ctx, _val, _Array_push_atom, 1, _n_p)
-    #
-    #         ffi.release(_n_p)
-    #         _JS_FreeValue(_ctx, _n)
-    #
-    #     lib.JS_FreeAtom(_ctx, _Array_push_atom)
-    #     # print(f'[1] {lib.JS_IsArray(_ctx, _val)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_val)=}')
-    #     val2 = JSArray(_ctx, _val)
-    #     # print(f'[2] {lib.JS_IsArray(_ctx, _val)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_val)=}')
-    #     # print(f'!!! {val2=}')
-    # elif isinstance(val, dict):
-    #     _val = lib.JS_NewObject(_ctx)
-    #
-    #     for k, v in val.items():
-    #         assert isinstance(k, str)
-    #         _k: bytes = k.encode()
-    #         _v: _JSValue = convert_pyvalue_to_jsvalue(_ctx, v)
-    #
-    #         lib.JS_SetPropertyStr(_ctx, _val, _k, _v)
-    #
-    #         # NOTE: line below is not required based on JS_SetPropertyStr logic
-    #         #   _JS_FreeValue(_ctx, _v)
-    #
-    #     val2 = JSObject(_ctx, _val)
     elif isinstance(val, (list, tuple)):
         _val = lib.JS_NewArray(_ctx)
         _Array_push_atom = lib.JS_NewAtom(_ctx, b'push')
@@ -683,6 +649,7 @@ class JSFunction(JSValue):
 
         jsargs_len, _jsargs = convert_pyargs_to_jsargs(_ctx, pyargs)
         _ret = lib.JS_Call(_ctx, _val, _this, jsargs_len, _jsargs)
+        print(f'JSFunction.__call__ {_ret=} {_ret.tag=} {lib.JS_IsArray(_ctx, _ret)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_ret)=}')
         ret = convert_jsvalue_to_pyvalue(_ctx, _ret)
         ffi.release(_jsargs)
 
@@ -691,6 +658,7 @@ class JSFunction(JSValue):
         # else:
         #     _JS_FreeValue(_ctx, _ret)
 
+        # ret = None
         return ret
 
 
