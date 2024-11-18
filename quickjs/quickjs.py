@@ -149,7 +149,7 @@ def stringify_object(_ctx: _JSContext_P, _obj: _JSValue) -> str:
     _jsargs: _JSValue_P = ffi.new('JSValue[]', [_obj])
 
     _val = lib.JS_Call(_ctx, _func, _this, jsargs_len, _jsargs)
-    val = convert_jsvalue_to_pystr(_ctx, _val)
+    val: str = convert_jsvalue_to_pystr(_ctx, _val)
 
     ffi.release(_jsargs)
     _JS_FreeValue(_ctx, _val)
@@ -163,8 +163,8 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
 
     if is_exception:
         _e_val = lib.JS_GetException(_ctx)
-        _JS_FreeValue(_ctx, _val)
         e = JSError(_ctx, _e_val)
+        _JS_FreeValue(_ctx, _val)
         raise e
 
     if _val.tag == lib.JS_TAG_FIRST:
@@ -194,18 +194,13 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
             val = JSObject(_ctx, _val) # Object, Map, Set, etc
     elif _val.tag == lib.JS_TAG_INT:
         val = lib._macro_JS_VALUE_GET_INT(_val)
-        # _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_BOOL:
-        val = lib._macro_JS_VALUE_GET_BOOL(_val)
-        # _JS_FreeValue(_ctx, _val)
+        val: int = lib._macro_JS_VALUE_GET_BOOL(_val)
+        val: bool = bool(val)
     elif _val.tag == lib.JS_TAG_NULL:
         val = None
-        # _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_UNDEFINED:
-        # val = None # FIXME: use special value
-        # _JS_FreeValue(_ctx, _val)
         val = JSUndefined(_ctx, _val)
-        # _JS_FreeValue(_ctx, _val)
     elif _val.tag == lib.JS_TAG_UNINITIALIZED:
         raise NotImplementedError('JS_TAG_CATCH_OFFSET')
     elif _val.tag == lib.JS_TAG_CATCH_OFFSET:
@@ -215,7 +210,6 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
         raise NotImplementedError('JS_TAG_EXCEPTION')
     elif _val.tag == lib.JS_TAG_FLOAT64:
         val = lib._macro_JS_VALUE_GET_FLOAT64(_val)
-        # _JS_FreeValue(_ctx, _val)
     else:
         _JS_FreeValue(_ctx, _val)
         raise NotImplementedError('JS_NAN_BOXING')
@@ -360,9 +354,14 @@ class JSValue:
         val: str = stringify_object(_ctx, _val)
 
         if lib._macro_JS_VALUE_HAS_REF_COUNT(_val):
-            return f'<{self.__class__.__name__} at {hex(id(self))} tag={tag.name} ptr={_val.u.ptr} {val=}>'
+            ref_count: int = lib._macro_JS_VALUE_GET_REF_COUNT(_val)
+
+            if lib.JS_IsFunction(_ctx, _val):
+                return f'<{self.__class__.__name__} at {hex(id(self))} tag={tag.name} ptr={_val.u.ptr} {ref_count=}>'
+            else:
+                return f'<{self.__class__.__name__} at {hex(id(self))} tag={tag.name} ptr={_val.u.ptr} {ref_count=} val={val}>'
         else:
-            return f'<{self.__class__.__name__} at {hex(id(self))} tag={tag.name} {val=}>'
+            return f'<{self.__class__.__name__} at {hex(id(self))} tag={tag.name} val={val}>'
 
 
     def __getattr__(self, attr: str) -> Any:
@@ -395,7 +394,7 @@ class JSString(JSValue):
 
 
 class JSSymbol(JSValue):
-    def __repr__(self) -> str:
+    def __repr1__(self) -> str:
         _ctx = self._ctx
         _val = self._val
 
@@ -429,12 +428,6 @@ class JSFunction(JSValue):
         ctx.add_qjsvalue(self)
 
 
-    def __repr__(self) -> str:
-        _ctx = self._ctx
-        _val = self._val
-        return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr}>'
-
-
     def __call__(self, *pyargs) -> Any:
         _ctx = self._ctx
         _val = self._val
@@ -462,30 +455,25 @@ class JSFunction(JSValue):
 
 
 class JSError(JSValue, Exception):
-    def __init__(self, _ctx: _JSContext_P, _val: _JSValue, verbose: bool=False):
-        self._ctx = _ctx
-        self._val = _val
-        self.verbose = verbose
-
-        ctx = JSContext.get_qjscontext(_ctx)
-        ctx.add_qjsvalue(self)
+    def __init__(self, _ctx: _JSContext_P, _val: _JSValue):
+        super().__init__(_ctx, _val)
 
 
     def __repr__(self) -> str:
         _ctx = self._ctx
         _val: _JSValue = self._val
+        tag = JSTag(_val.tag)
 
-        is_error = lib.JS_IsError(_ctx, _val)
+        # ???
+        # is_error = lib.JS_IsError(_ctx, _val)
 
         _c_str = _JS_ToCString(_ctx, _val)
         val = ffi.string(_c_str)
         val = val.decode()
         lib.JS_FreeCString(_ctx, _c_str)
 
-        if self.verbose:
-            return f'<{self.__class__.__name__} at {hex(id(self))} {_val.u.ptr} {is_error=} {val=}>'
-        else:
-            return f'<{self.__class__.__name__} at {hex(id(self))} {val!r}>'
+        ref_count: int = lib._macro_JS_VALUE_GET_REF_COUNT(_val)
+        return f'<{self.__class__.__name__} at {hex(id(self))} tag={tag.name} ptr={_val.u.ptr} {ref_count=} val={val!r}>'
 
 
 class JSRuntime:
@@ -558,6 +546,11 @@ class JSContext:
                         return '[Circular]';
                     }
                     seen.add(obj);
+                }
+
+                // Handle Symbol type
+                if (typeof obj === 'symbol') {
+                    return `"${obj.description || obj.toString()}"`;
                 }
 
                 // Handle BigInt

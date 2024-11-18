@@ -48,6 +48,12 @@ def demo1():
     val = ctx.eval('var b = [1, 2.0, "3"].map(n => n * 2); b')
     print(val, type(val))
 
+    val = ctx.eval('[1, 2.0, "3"].map(n => n * 2)')
+    print(val, type(val))
+
+    val = ctx.eval('Array.from')
+    print(val, type(val))
+
     val = ctx.eval('[].map')
     print(val, type(val))
 
