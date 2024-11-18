@@ -44,8 +44,8 @@ def demo2():
     val = ctx['a5']
     print(val, type(val))
 
-    ctx['b0'] = [1, 2.0, '3']
-    val = ctx['b0']
+    # ctx['b0'] = [1, 2.0, '3']
+    # val = ctx['b0']
     # print(val, type(val))
 
     # ctx['b'] = [1, 2.0, '3', [10, [20, 30]]]

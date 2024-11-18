@@ -118,6 +118,15 @@ class JSEval(Enum):
     FLAG_ASYNC = JS_EVAL_FLAG_ASYNC
 
 
+# special values
+JS_NULL: _JSValue = lib._macro_JS_MKVAL(JSTag.NULL.value, 0)
+JS_UNDEFINED: _JSValue = lib._macro_JS_MKVAL(JSTag.UNDEFINED.value, 0)
+JS_FALSE: _JSValue = lib._macro_JS_MKVAL(JSTag.BOOL.value, 0)
+JS_TRUE: _JSValue = lib._macro_JS_MKVAL(JSTag.BOOL.value, 1)
+JS_EXCEPTION: _JSValue = lib._macro_JS_MKVAL(JSTag.EXCEPTION.value, 0)
+JS_UNINITIALIZED: _JSValue = lib._macro_JS_MKVAL(JSTag.UNINITIALIZED.value, 0)
+
+
 def _JS_ToCString(_ctx: _JSContext_P, _val: _JSValue) -> _char_p:
     return lib._inline_JS_ToCString(_ctx, _val)
 
@@ -135,14 +144,6 @@ def _JS_Eval(_ctx: _JSContext_P, buf: str, filename: str='<inupt>', eval_flags: 
     return _val
 
 
-def convert_jsvalue_to_pystr(_ctx: _JSContext_P, _val: _JSValue) -> str:
-    _c_str: _char_p = _JS_ToCString(_ctx, _val)
-    val: bytes = ffi.string(_c_str)
-    val: str = val.decode()
-    lib.JS_FreeCString(_ctx, _c_str)
-    return val
-
-
 def stringify_object(_ctx: _JSContext_P, _obj: _JSValue) -> str:
     _this: _JSValue = lib.JS_GetGlobalObject(_ctx)
     _func = lib.JS_GetPropertyStr(_ctx, _this, b'__stringifyObject')
@@ -150,7 +151,10 @@ def stringify_object(_ctx: _JSContext_P, _obj: _JSValue) -> str:
     _jsargs: _JSValue_P = ffi.new('JSValue[]', [_obj])
 
     _val = lib.JS_Call(_ctx, _func, _this, jsargs_len, _jsargs)
-    val: str = convert_jsvalue_to_pystr(_ctx, _val)
+    _c_str: _char_p = _JS_ToCString(_ctx, _val)
+    val: bytes = ffi.string(_c_str)
+    val: str = val.decode()
+    lib.JS_FreeCString(_ctx, _c_str)
 
     ffi.release(_jsargs)
     _JS_FreeValue(_ctx, _val)
@@ -173,8 +177,6 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
     elif _val.tag == lib.JS_TAG_BIG_DECIMAL:
         raise NotImplementedError('JS_TAG_BIG_DECIMAL')
     elif _val.tag == lib.JS_TAG_BIG_INT:
-        # val: str = convert_jsvalue_to_pystr(_ctx, _val)
-        # val: int = int(val)
         val = JSBigInt(_ctx, _val)
     elif _val.tag == lib.JS_TAG_BIG_FLOAT:
         raise NotImplementedError('JS_TAG_BIG_FLOAT')
@@ -191,7 +193,6 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
             val = JSFunction(_ctx, _val, None)
         elif lib.JS_IsArray(_ctx, _val):
             val = JSArray(_ctx, _val)
-            # print('!!! val 3', val)
         else:
             val = JSObject(_ctx, _val) # Object, Map, Set, etc
     elif _val.tag == lib.JS_TAG_INT:
@@ -229,17 +230,18 @@ def convert_pyargs_to_jsargs(_ctx: _JSContext_P, pyargs: list[Any]) -> (int, _JS
 
 def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
     if val is None:
-        _val = _JS_Eval(_ctx, 'null')
+        _val = JS_NULL
     elif isinstance(val, JSValue):
         _val = val._val
     elif isinstance(val, bool):
-        _val = _JS_Eval(_ctx, json.dumps(val))
+        _val = JS_TRUE if val else JS_FALSE
     elif isinstance(val, int):
-        _val = _JS_Eval(_ctx, json.dumps(val))
+        assert -2 ** 31 <= val < 2 ** 31
+        _val = lib._macro_JS_MKVAL(JSTag.INT.value, val)
     elif isinstance(val, float):
-        _val = _JS_Eval(_ctx, json.dumps(val))
+        _val = lib._inline___JS_NewFloat64(_ctx, val)
     elif isinstance(val, str):
-        _val = _JS_Eval(_ctx, json.dumps(val))
+        _val = lib.JS_NewString(_ctx, val.encode())
     elif isinstance(val, (list, tuple)):
         _val = lib.JS_NewArray(_ctx)
         # print(f'[0] {lib.JS_IsArray(_ctx, _val)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_val)=}')
