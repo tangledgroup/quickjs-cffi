@@ -1,4 +1,3 @@
-import os
 import sys
 sys.path.append('..')
 
@@ -93,6 +92,9 @@ def demo2():
     val = ctx['a3']
     print(val, type(val))
 
+    val = ctx.eval('"Hello there!!!"')
+    print(val, type(val))
+
     ctx['a4'] = 'Hello there!'
     val = ctx['a4']
     print(val, type(val))
@@ -101,25 +103,29 @@ def demo2():
     val = ctx['a5']
     print(val, type(val))
 
-    ctx['b'] = [1, 2.0, '3', [10, [20, 30]]]
-    val = ctx['b']
-    print(val, type(val))
+    ctx['b0'] = [1, 2.0, '3']
+    val = ctx['b0']
+    # print(val, type(val))
 
-    ctx.eval('b = b.map(n => n * 2)')
-    val = ctx['b']
-    print(val, type(val))
+    # ctx['b'] = [1, 2.0, '3', [10, [20, 30]]]
+    # val = ctx['b']
+    # print(val, type(val))
 
-    ctx.eval('b = b.map(n => n * 2)')
-    val = ctx['b']
-    print(val, type(val))
+    # ctx.eval('b = b.map(n => n * 2)')
+    # val = ctx['b']
+    # print(val, type(val))
 
-    ctx['c'] = {'x': 1, 'y': 2, 'w': [1, 2, 3], 'v': {'a': True, 'b': False}}
-    val = ctx['c']
-    print(val, type(val))
+    # ctx.eval('b = b.map(n => n * 2)')
+    # val = ctx['b']
+    # print(val, type(val))
 
-    ctx['c'] = {'x': 1, 'y': 2}
-    val = ctx['c']
-    print(val, type(val))
+    # ctx['c'] = {'x': 1, 'y': 2, 'w': [1, 2, 3], 'v': {'a': True, 'b': False}}
+    # val = ctx['c']
+    # print(val, type(val))
+
+    # ctx['c'] = {'x': 1, 'y': 2}
+    # val = ctx['c']
+    # print(val, type(val))
 
 
 def demo3():

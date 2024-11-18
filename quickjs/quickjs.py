@@ -126,7 +126,8 @@ def _JS_FreeValue(_ctx: _JSContext_P, _val: _JSValue):
     lib._inline_JS_FreeValue(_ctx, _val)
 
 
-def _JS_Eval(_ctx: _JSContext_P, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
+def _JS_Eval(_ctx: _JSContext_P, buf: str, filename: str='<inupt>', eval_flags: int | JSEval=JSEval.TYPE_GLOBAL) -> Any:
+    eval_flags = eval_flags if isinstance(eval_flags, int) else eval_flags.value
     _buf: bytes = buf.encode()
     _buf_len: int = len(_buf)
     _filename: bytes = filename.encode()
@@ -190,6 +191,7 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
             val = JSFunction(_ctx, _val, None)
         elif lib.JS_IsArray(_ctx, _val):
             val = JSArray(_ctx, _val)
+            # print('!!! val 3', val)
         else:
             val = JSObject(_ctx, _val) # Object, Map, Set, etc
     elif _val.tag == lib.JS_TAG_INT:
@@ -240,12 +242,14 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
         _val = _JS_Eval(_ctx, json.dumps(val))
     elif isinstance(val, (list, tuple)):
         _val = lib.JS_NewArray(_ctx)
-        val2 = JSValue(_ctx, _val)
+        # print(f'[0] {lib.JS_IsArray(_ctx, _val)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_val)=}')
         _Array_push_atom = lib.JS_NewAtom(_ctx, b'push')
 
         for n in val:
+            # print(f'!!! {n=}')
             _n: _JSValue = convert_pyvalue_to_jsvalue(_ctx, n)
             _n_p: _JSValue_P = ffi.new('JSValue[]', [_n])
+            # print(f'{_n=} {lib.JS_IsArray(_ctx, _n)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_n)=}')
 
             lib.JS_Invoke(_ctx, _val, _Array_push_atom, 1, _n_p)
 
@@ -253,9 +257,12 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
             _JS_FreeValue(_ctx, _n)
 
         lib.JS_FreeAtom(_ctx, _Array_push_atom)
+        # print(f'[1] {lib.JS_IsArray(_ctx, _val)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_val)=}')
+        val2 = JSArray(_ctx, _val)
+        # print(f'[2] {lib.JS_IsArray(_ctx, _val)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_val)=}')
+        # print(f'!!! {val2=}')
     elif isinstance(val, dict):
         _val = lib.JS_NewObject(_ctx)
-        val2 = JSValue(_ctx, _val)
 
         for k, v in val.items():
             assert isinstance(k, str)
@@ -266,6 +273,8 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
 
             # NOTE: line below is not required based on JS_SetPropertyStr logic
             #   _JS_FreeValue(_ctx, _v)
+
+        val2 = JSObject(_ctx, _val)
     elif callable(val):
         val_handler: _void_p = ffi.new_handle(val)
         _c_temp.add(val_handler)
@@ -322,7 +331,7 @@ def _quikcjs_cffi_py_func_wrap(_ctx, _this_val, _argc, _argv, _magic, _func_data
 
     _ret = convert_pyvalue_to_jsvalue(_ctx, ret)
     # _c_temp.discard(_val_p)
-    print(f'{_c_temp = }')
+    # print(f'{_c_temp = }')
     return _ret
 
 
@@ -645,15 +654,15 @@ class JSContext:
         _ctx = self._ctx
         _this: _JSValue = lib.JS_GetGlobalObject(_ctx)
         _key = key.encode()
+        _key_atom = lib.JS_NewAtom(_ctx, _key)
 
-        _val = lib.JS_GetPropertyStr(_ctx, _this, _key)
+        _val = lib._inline_JS_GetProperty(_ctx, _this, _key_atom)
         val = convert_jsvalue_to_pyvalue(_ctx, _val)
 
         if isinstance(val, JSValue):
             self.add_qjsvalue(val)
-        else:
-            _JS_FreeValue(_ctx, _val)
 
+        lib.JS_FreeAtom(_ctx, _key_atom)
         _JS_FreeValue(_ctx, _this)
         return val
 
@@ -662,28 +671,25 @@ class JSContext:
         _ctx = self._ctx
         _this: _JSValue = lib.JS_GetGlobalObject(_ctx)
         _key = key.encode()
+        _key_atom = lib.JS_NewAtom(_ctx, _key)
         _val = convert_pyvalue_to_jsvalue(_ctx, val)
 
-        lib.JS_SetPropertyStr(_ctx, _this, _key, _val)
+        lib._inline_JS_SetProperty(_ctx, _this, _key_atom, _val)
 
         # NOTE: do not free _val because set does not increase ref count
-        #   _JS_FreeValue(_ctx, _val)
+        # _JS_FreeValue(_ctx, _val)
+        lib.JS_FreeAtom(_ctx, _key_atom)
         _JS_FreeValue(_ctx, _this)
 
 
-    def eval(self, buf: str, filename: str='<inupt>', eval_flags: int=JS_EVAL_TYPE_GLOBAL) -> Any:
+    def eval(self, buf: str, filename: str='<inupt>', eval_flags: JSEval | int=JSEval.TYPE_GLOBAL) -> Any:
+        eval_flags = eval_flags if isinstance(eval_flags, int) else eval_flags.value
         _ctx = self._ctx
         _val: _JSValue = _JS_Eval(_ctx, buf, filename, eval_flags)
-        # if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [0]', lib._macro_JS_VALUE_GET_REF_COUNT(_val))
         val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
 
         if isinstance(val, JSValue):
-            # if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [1]', lib._macro_JS_VALUE_GET_REF_COUNT(val._val))
             self.add_qjsvalue(val)
-            # if lib._macro_JS_VALUE_HAS_REF_COUNT(_val): print('*** [2]', lib._macro_JS_VALUE_GET_REF_COUNT(val._val))
-
-        else:
-            _JS_FreeValue(_ctx, _val)
 
         return val
 
