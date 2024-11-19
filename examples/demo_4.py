@@ -14,15 +14,15 @@ def demo4():
     lodash = ctx['_']
     print(lodash, type(lodash))
 
-    r = lodash.range
-    print(r, type(r))
+    # r = lodash.range
+    # print(r, type(r))
 
-    r = lodash.range(10, 100, 10)
-    print(r, type(r))
+    # r = lodash.range(10, 100, 10)
+    # print(r, type(r))
 
-    _f0 = ctx.eval('n => n >= 50')
-    r = lodash.filter(lodash.range(10, 100, 10), _f0)
-    print(r, type(r))
+    # _f0 = ctx.eval('n => n >= 50')
+    # r = lodash.filter(lodash.range(10, 100, 10), _f0)
+    # print(r, type(r))
 
     def _f0(n, *args): return n >= 50
     r = lodash.filter(lodash.range(10, 100, 10), _f0)
