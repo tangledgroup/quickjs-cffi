@@ -25,6 +25,8 @@ _JSContext = NewType('JSContext', ffi.typeof('JSContext'))
 _JSContext_P = NewType('JSContext*', ffi.typeof('JSContext*'))
 _JSValue = NewType('JSValue', ffi.typeof('JSValue'))
 _JSValue_P = NewType('JSValue*', ffi.typeof('JSValue*'))
+_JSValueConst = NewType('JSValueConst', ffi.typeof('JSValue'))
+_JSValueConst_P = NewType('JSValueConst*', ffi.typeof('JSValue*'))
 _JSString_P = NewType('JSString*', ffi.typeof('void*'))
 _JSObject_P = NewType('JSObject*', ffi.typeof('JSObject*'))
 
@@ -131,7 +133,12 @@ def _JS_ToCString(_ctx: _JSContext_P, _val: _JSValue) -> _char_p:
     return lib._inline_JS_ToCString(_ctx, _val)
 
 
+def _JS_DupValue(_ctx: _JSContext_P, _val: _JSValue):
+    # p->ref_count++
+    lib._inline_JS_DupValue(_ctx, _val)
+
 def _JS_FreeValue(_ctx: _JSContext_P, _val: _JSValue):
+    # --p->ref_count, and possibly free
     lib._inline_JS_FreeValue(_ctx, _val)
 
 
@@ -193,7 +200,7 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
             val = JSFunction(_ctx, _val, None)
         elif lib.JS_IsArray(_ctx, _val):
             val = JSArray(_ctx, _val)
-            print('!!!', val)
+            # print('!!!', val)
         else:
             val = JSObject(_ctx, _val) # Object, Map, Set, etc
     elif _val.tag == lib.JS_TAG_INT:
@@ -219,14 +226,6 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
         raise NotImplementedError('JS_NAN_BOXING')
 
     return val
-
-
-# def convert_pyargs_to_jsargs(_ctx: _JSContext_P, pyargs: list[Any]) -> (int, _JSValue):
-#     # _filename: _char_p = ffi.cast('char*', 0)
-#     val_length = len(pyargs)
-#     _val = [convert_pyvalue_to_jsvalue(_ctx, n) for n in pyargs]
-#     _val = ffi.new('JSValue[]', _val)
-#     return val_length, _val
 
 
 def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
@@ -294,17 +293,24 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
 
 # typedef JSValue JSCFunctionData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data);
 @ffi.def_extern()
-def _quikcjs_cffi_py_func_wrap(_ctx, _this_val, _argc, _argv, _magic, _func_data):
+def _quikcjs_cffi_py_func_wrap(_ctx: _JSContext_P, _this_val: _JSValueConst, _argc: int, _argv: _JSValueConst_P, _magic: int, _func_data: _JSValue_P):
     _val_handler: _JSValue = _func_data[0]
     _val_p: _void_p = lib._macro_JS_VALUE_GET_PTR(_val_handler)
     val_handler = ffi.from_handle(_val_p)
     py_func = val_handler
 
-    pyargs = [_argv[i] for i in range(_argc)]
-    pyargs = [convert_jsvalue_to_pyvalue(_ctx, n) for n in pyargs]
-    ret = py_func(*pyargs)
+    _jsargs = [_argv[i] for i in range(_argc)]
 
+    # NOTE: this is necessary to inc ref_count, so GC does not clean JS objects during function call
+    for _jsarg in _jsargs:
+        _JS_DupValue(_ctx, _jsarg)
+
+    # pyargs = [_argv[i] for i in range(_argc)]
+    # pyargs = [convert_jsvalue_to_pyvalue(_ctx, n) for n in pyargs]
+    pyargs = [convert_jsvalue_to_pyvalue(_ctx, _jsarg) for _jsarg in _jsargs]
+    ret = py_func(*pyargs)
     _ret = convert_pyvalue_to_jsvalue(_ctx, ret)
+
     # _c_temp.discard(_val_p)
     # print(f'{_c_temp = }')
     return _ret
@@ -564,6 +570,7 @@ class JSValue:
 
 
     def __del__(self):
+        print('JSValue.__del__', self)
         _ctx = self._ctx
         _val = self._val
         _rt = lib.JS_GetRuntime(_ctx)
@@ -598,12 +605,6 @@ class JSValue:
         _attr: bytes = attr.encode()
         _ret = lib.JS_GetPropertyStr(_ctx, _val, _attr)
         ret: Any = convert_jsvalue_to_pyvalue(_ctx, _ret)
-
-        # if isinstance(ret, JSValue):
-        #     pass
-        # else:
-        #     _JS_FreeValue(_ctx, _ret)
-
         return ret
 
 
@@ -646,16 +647,15 @@ class JSFunction(JSValue):
         _ctx = self._ctx
         _val = self._val
         _this = self._this
-
         print(f'JSFunction.__call__ {_val=} {_val.tag=} {lib.JS_IsFunction(_ctx, _val)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_val)=}')
 
-        # jsargs_len, _jsargs = convert_pyargs_to_jsargs(_ctx, pyargs)
-        jsargs_len: int = len(pyargs)
+        _jsargs_len: int = len(pyargs)
         _jsargs: _JSValue_P = ffi.new('JSValue[]', [convert_pyvalue_to_jsvalue(_ctx, n) for n in pyargs])
 
-        _ret: _JSValue = lib.JS_Call(_ctx, _val, _this, jsargs_len, _jsargs)
+        _ret: _JSValue = lib.JS_Call(_ctx, _val, _this, _jsargs_len, _jsargs)
         print(f'JSFunction.__call__ {_ret=} {_ret.tag=} {lib.JS_IsArray(_ctx, _ret)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_ret)=}')
         ret = convert_jsvalue_to_pyvalue(_ctx, _ret)
+        # print(f'JSFunction.__call__ {ret=}')
 
         ffi.release(_jsargs)
 
@@ -664,7 +664,7 @@ class JSFunction(JSValue):
         # else:
         #     _JS_FreeValue(_ctx, _ret)
 
-        ret = None
+        # ret = None
         return ret
 
 
