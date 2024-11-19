@@ -35,20 +35,40 @@ def demo3():
         }
     ''')
 
-    f = ctx['f']
+    f = ctx.get('f')
     print(f, type(f))
+    print(f, type(f), f.toString)
+    print(f.toString)
+    print(f.toString())
+
+    f_toString = f.toString
+    print(f_toString())
+
+    f_toString = f.toString
+    r = f_toString()
+    r = r.toString()
+    r = r.toString()
+    r = r.toString()
+    r = r.toString()
+    r = r.toString()
+    r = r.toString()
+    print(r)
 
     r = f(2, 3, 4)
     print(r, type(r))
 
-    g = ctx.get('g')
-    print(f, type(f))
+    g = ctx['g']
+    print(g, type(g))
+    r = g([20, 30], [40, 50, 60])
+    print(r, type(r))
 
+    g = ctx.get('g')
+    print(g, type(g))
     r = g([20, 30], [40, 50, 60])
     print(r, type(r))
 
     h = ctx.get('h')
-    print(f, type(f))
+    print(h, type(h))
 
     r = h({'20': 20}, {'40': 40, '50': 50})
     print(r, type(r))

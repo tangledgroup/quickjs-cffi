@@ -8,7 +8,6 @@ __all__ = [
 
 import os
 import re
-import json
 import inspect
 import tempfile
 import urllib.request
@@ -170,10 +169,12 @@ def stringify_object(_ctx: _JSContext_P, _obj: _JSValue) -> str:
     return val
 
 
-def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
+def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue, _this: _JSValue=JS_UNDEFINED) -> Any:
     is_exception: bool = lib._inline_JS_IsException(_val)
 
     if is_exception:
+        # NOTE: use to debug internal JS errors
+        #   lib.js_std_dump_error(_ctx)
         _e_val = lib.JS_GetException(_ctx)
         e = JSError(_ctx, _e_val)
         _JS_FreeValue(_ctx, _val)
@@ -197,10 +198,9 @@ def convert_jsvalue_to_pyvalue(_ctx: _JSContext_P, _val: _JSValue) -> Any:
         raise NotImplementedError('JS_TAG_FUNCTION_BYTECODE')
     elif _val.tag == lib.JS_TAG_OBJECT:
         if lib.JS_IsFunction(_ctx, _val):
-            val = JSFunction(_ctx, _val, None)
+            val = JSFunction(_ctx, _val, _this)
         elif lib.JS_IsArray(_ctx, _val):
             val = JSArray(_ctx, _val)
-            # print('!!!', val)
         else:
             val = JSObject(_ctx, _val) # Object, Map, Set, etc
     elif _val.tag == lib.JS_TAG_INT:
@@ -238,6 +238,7 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
     elif isinstance(val, int):
         assert -2 ** 31 <= val < 2 ** 31
         _val = lib._macro_JS_MKVAL(JSTag.INT.value, val)
+        # _val = _JS_Eval(_ctx, f'{val}')
     elif isinstance(val, float):
         _val = lib._inline___JS_NewFloat64(_ctx, val)
     elif isinstance(val, str):
@@ -288,6 +289,7 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
     else:
         raise ValueError(f'Unsupported Python value {type(val)}')
 
+    _c_temp.add(_val) # ???
     return _val
 
 
@@ -523,9 +525,6 @@ class JSContext:
         _key = key.encode()
         _key_atom = lib.JS_NewAtom(_ctx, _key)
         _val = convert_pyvalue_to_jsvalue(_ctx, val)
-        # print(f'JSContext.set [0] {_val=} {_val.tag=}')
-        # val2 = convert_jsvalue_to_pyvalue(_ctx, _val)
-        # print(f'JSContext.set [1] {val2=}')
 
         lib._inline_JS_SetProperty(_ctx, _this, _key_atom, _val)
 
@@ -570,7 +569,7 @@ class JSValue:
 
 
     def __del__(self):
-        print('JSValue.__del__', self)
+        # print('JSValue.__del__', self)
         _ctx = self._ctx
         _val = self._val
         _rt = lib.JS_GetRuntime(_ctx)
@@ -604,7 +603,7 @@ class JSValue:
         _val = self._val
         _attr: bytes = attr.encode()
         _ret = lib.JS_GetPropertyStr(_ctx, _val, _attr)
-        ret: Any = convert_jsvalue_to_pyvalue(_ctx, _ret)
+        ret: Any = convert_jsvalue_to_pyvalue(_ctx, _ret, _val)
         return ret
 
 
@@ -634,10 +633,13 @@ class JSObject(JSValue):
 
 
 class JSFunction(JSValue):
-    def __init__(self, _ctx: _JSContext_P, _val: _JSValue=None, _this: _JSValue=None):
+    def __init__(self, _ctx: _JSContext_P, _val: _JSValue=None, _this: _JSValue=JS_UNDEFINED):
         self._ctx = _ctx
         self._val = _val
-        self._this = _this if _this else lib.JS_GetGlobalObject(_ctx)
+        self._this = _this # NOTE: this might be useful lib.JS_GetGlobalObject(_ctx)
+
+        # NOTE: required so GC does not collect it
+        _JS_DupValue(_ctx, _this)
 
         ctx = JSContext.get_qjscontext(_ctx)
         ctx.add_qjsvalue(self)
@@ -647,28 +649,34 @@ class JSFunction(JSValue):
         _ctx = self._ctx
         _val = self._val
         _this = self._this
-        print(f'JSFunction.__call__ {_val=} {_val.tag=} {lib.JS_IsFunction(_ctx, _val)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_val)=}')
+        # print(f'JSFunction.__call__ {_val=} {_val.tag=} {lib.JS_IsFunction(_ctx, _val)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_val)=}')
 
         _jsargs_len: int = len(pyargs)
-        _jsargs: _JSValue_P = ffi.new('JSValue[]', [convert_pyvalue_to_jsvalue(_ctx, n) for n in pyargs])
+        _jsargs = [convert_pyvalue_to_jsvalue(_ctx, n) for n in pyargs]
+        # print(f'{_jsargs_len=} {_jsargs=}', [n.tag for n in _jsargs], [n.u.int32 for n in _jsargs])
 
-        _ret: _JSValue = lib.JS_Call(_ctx, _val, _this, _jsargs_len, _jsargs)
-        print(f'JSFunction.__call__ {_ret=} {_ret.tag=} {lib.JS_IsArray(_ctx, _ret)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_ret)=}')
+        # NOTE: this is necessary to inc ref_count, so GC does not clean JS objects during function call
+        _JS_DupValue(_ctx, _val)
+        _JS_DupValue(_ctx, _this)
+
+        for _jsarg in _jsargs:
+            _JS_DupValue(_ctx, _jsarg)
+
+        _jsargs_a: _JSValue_P = ffi.new('JSValue[]', _jsargs)
+
+        _ret: _JSValue = lib.JS_Call(_ctx, _val, _this, _jsargs_len, _jsargs_a)
         ret = convert_jsvalue_to_pyvalue(_ctx, _ret)
+        # print(f'JSFunction.__call__ {_ret=} {_ret.tag=} {lib.JS_IsArray(_ctx, _ret)=} {lib._macro_JS_VALUE_GET_REF_COUNT(_ret)=}')
         # print(f'JSFunction.__call__ {ret=}')
 
-        ffi.release(_jsargs)
-
-        # if isinstance(ret, JSValue):
-        #     pass
-        # else:
-        #     _JS_FreeValue(_ctx, _ret)
-
-        # ret = None
+        ffi.release(_jsargs_a)
+        _JS_FreeValue(_ctx, _this)
+        _JS_FreeValue(_ctx, _val)
         return ret
 
 
     def __del__(self):
+        # print('JSFunction.__del__', self)
         _ctx = self._ctx
         _val = self._val
         _this = self._this
@@ -677,7 +685,7 @@ class JSFunction(JSValue):
         if lib.JS_IsLiveObject(_rt, _val):
             _JS_FreeValue(_ctx, _val)
 
-        if lib.JS_IsLiveObject(_rt, _this):
+        if lib._inline_JS_IsObject(_this) and lib.JS_IsLiveObject(_rt, _this):
             _JS_FreeValue(_ctx, _this)
 
 
@@ -687,6 +695,10 @@ class JSFunction(JSValue):
 class JSError(JSValue, Exception):
     def __init__(self, _ctx: _JSContext_P, _val: _JSValue):
         super().__init__(_ctx, _val)
+
+
+    def __str__(self) -> str:
+        return repr(self)
 
 
     def __repr__(self) -> str:
