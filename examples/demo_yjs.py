@@ -1,7 +1,7 @@
 import sys
 sys.path.append('..')
 
-from quickjs import JSRuntime, JSContext, JSEval
+from quickjs import JSRuntime, JSContext
 
 
 def demo0():

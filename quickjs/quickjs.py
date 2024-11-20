@@ -11,7 +11,6 @@ import re
 import inspect
 import tempfile
 import urllib.request
-from urllib.parse import urlparse
 from enum import Enum
 from weakref import WeakSet
 from typing import Any, NewType
