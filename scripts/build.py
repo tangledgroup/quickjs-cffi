@@ -251,6 +251,7 @@ def build_quickjs_repo(*args, **kwargs):
     typedef JSValue JSValueConst;
 
     extern "Python" JSValue _quikcjs_cffi_py_func_wrap(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data);
+    extern "Python" JSModuleDef *_quikcjs_cffi_js_module_loader(JSContext *ctx, const char *module_name, void *opaque);
 
     int _macro_JS_VALUE_GET_TAG(JSValue v);
     int _macro_JS_VALUE_GET_NORM_TAG(JSValue v);

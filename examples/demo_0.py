@@ -4,7 +4,7 @@ sys.path.append('..')
 from quickjs import JSEval, JSRuntime, JSContext, JSError
 
 
-def demo5():
+def demo0():
     from tqdm import tqdm
 
     rt = JSRuntime()
@@ -15,5 +15,5 @@ def demo5():
 
 
 if __name__ == '__main__':
-    demo5()
+    demo0()
     # input('Press any key')

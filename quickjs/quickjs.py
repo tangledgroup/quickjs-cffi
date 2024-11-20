@@ -11,6 +11,7 @@ import re
 import inspect
 import tempfile
 import urllib.request
+from urllib.parse import urlparse
 from enum import Enum
 from weakref import WeakSet
 from typing import Any, NewType
@@ -20,6 +21,7 @@ from ._quickjs import ffi, lib
 
 _void_p = NewType('void*', ffi.typeof('void*'))
 _char_p = NewType('char*', ffi.typeof('char*'))
+_const_char_p = NewType('const char*', ffi.typeof('const char*'))
 _JSContext = NewType('JSContext', ffi.typeof('JSContext'))
 _JSContext_P = NewType('JSContext*', ffi.typeof('JSContext*'))
 _JSValue = NewType('JSValue', ffi.typeof('JSValue'))
@@ -28,6 +30,8 @@ _JSValueConst = NewType('JSValueConst', ffi.typeof('JSValue'))
 _JSValueConst_P = NewType('JSValueConst*', ffi.typeof('JSValue*'))
 _JSString_P = NewType('JSString*', ffi.typeof('void*'))
 _JSObject_P = NewType('JSObject*', ffi.typeof('JSObject*'))
+_JSModuleDef = NewType('JSModuleDef', ffi.typeof('JSModuleDef'))
+_JSModuleDef_P = NewType('JSModuleDef*', ffi.typeof('JSModuleDef*'))
 
 
 _c_temp: set[Any] = set()
@@ -319,22 +323,55 @@ def _quikcjs_cffi_py_func_wrap(_ctx: _JSContext_P, _this_val: _JSValueConst, _ar
 
 
 def download_file_to_tempfile(url: str) -> str:
-    file_extension = os.path.splitext(url)[-1]
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
         with urllib.request.urlopen(url) as response:
             temp_file.write(response.read())
+            temp_file.seek(0)
 
+        print(f'download_file_to_tempfile {temp_file.name=}')
         return temp_file.name
 
 
-def is_url(path_or_url: str) -> bool:
-    if url_pattern.match(path_or_url):
-        return True
+def read_script(path_or_url: str, is_remote_file: bool=False) -> tuple[str, str]:
+    if is_remote_file:
+        path = download_file_to_tempfile(path_or_url)
+    elif path_or_url.startswith('http://') or path_or_url.startswith('https://'):
+        path = download_file_to_tempfile(path_or_url)
     elif os.path.exists(path_or_url):
-        return False
+        path = path_or_url
     else:
-        raise ValueError(path_or_url)
+        for ext in ['', '.js', '.mjs']:
+            p = os.path.join('node_modules', path_or_url + ext)
+
+            if os.path.exists(p):
+                path = p
+                break
+        else:
+            raise ValueError(path_or_url)
+
+    with open(path) as f:
+        data: str = f.read()
+
+    return path, data
+
+
+# JSModuleDef *js_module_loader(JSContext *ctx, const char *module_name, void *opaque);
+@ffi.def_extern()
+def _quikcjs_cffi_js_module_loader(_ctx: _JSContext_P, _module_name: _const_char_p, _opaque: _void_p) -> _JSModuleDef_P:
+    # print(f'!!! _quikcjs_cffi_js_module_loader {_ctx=} {ffi.string(_module_name)=} {_opaque=}')
+    module_name: bytes = ffi.string(_module_name)
+    module_name: str = module_name.decode()
+    is_remote_file: bool = module_name.startswith('http://') or module_name.startswith('https://')
+    print(f'_quikcjs_cffi_js_module_loader [0] {module_name=} {is_remote_file=}')
+
+    path: str
+    data: str
+    path, data = read_script(module_name, is_remote_file)
+    _path: bytes = path.encode()
+
+    _module_def: _JSModuleDef_P = lib.js_module_loader(_ctx, _path, _opaque)
+    print(f'_quikcjs_cffi_js_module_loader [1] {path=} {_module_def=}')
+    return _module_def
 
 
 class JSRuntime:
@@ -346,7 +383,8 @@ class JSRuntime:
         lib.JS_SetModuleLoaderFunc(
             self._rt,
             ffi.cast('JSModuleNormalizeFunc*', 0),
-            lib.js_module_loader,
+            # lib.js_module_loader,
+            lib._quikcjs_cffi_js_module_loader,
             ffi.cast('void*', 0),
         )
 
@@ -537,7 +575,11 @@ class JSContext:
     def eval(self, buf: str, filename: str='<inupt>', eval_flags: JSEval | int=JSEval.TYPE_GLOBAL) -> Any:
         eval_flags = eval_flags if isinstance(eval_flags, int) else eval_flags.value
         _ctx = self._ctx
+
         _val: _JSValue = _JS_Eval(_ctx, buf, filename, eval_flags)
+        lib.js_std_dump_error(_ctx)
+
+
         val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
 
         if isinstance(val, JSValue):
@@ -546,16 +588,11 @@ class JSContext:
         return val
 
 
-    def load_script(self, path_or_url: str):
-        if is_url(path_or_url):
-            path = download_file_to_tempfile(path_or_url)
-        else:
-            path = path_or_url
-
-        with open(path) as f:
-            data: str = f.read()
-
-        val = self.eval(data, path)
+    def load_script(self, path_or_url: str) -> Any:
+        path: str
+        data: str
+        path, data = read_script(path_or_url)
+        val: Any = self.eval(data, path)
         return val
 
 
@@ -617,7 +654,11 @@ class JSBigInt(JSValue):
 
 
 class JSString(JSValue):
-    pass
+    def __str__(self) -> str:
+        _ctx = self._ctx
+        _val = self._val
+        val: str = stringify_object(_ctx, _val)
+        return val
 
 
 class JSSymbol(JSValue):
