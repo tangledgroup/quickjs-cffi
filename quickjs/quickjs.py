@@ -434,6 +434,24 @@ class JSContext:
 
         # stringify object
         code = '''
+        /*
+         * crypto - minimal polyfill for Yjs
+         */
+        if (!globalThis.crypto) {
+            globalThis.crypto = {
+                getRandomValues: function(array) {
+                    for (let i = 0; i < array.length; i++) {
+                        array[i] = Math.floor(Math.random() * 256);
+                    }
+
+                    return array;
+                }
+            };
+        }
+
+        /*
+         * browser console.log/toString like polyfill
+         */
         function stringifyObject(obj) {
             // Use a WeakSet for tracking seen objects to allow garbage collection
             const seen = new WeakSet();
@@ -489,7 +507,9 @@ class JSContext:
             return stringifyHelper(obj);
         }
 
-        globalThis.__stringifyObject = stringifyObject;
+        if (!globalThis.__stringifyObject) {
+            globalThis.__stringifyObject = stringifyObject;
+        }
         '''
 
         _val: _JSValue = _JS_Eval(_ctx, code)
