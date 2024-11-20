@@ -8,7 +8,7 @@ def demo_online():
     rt = JSRuntime()
     ctx: JSContext = rt.new_context()
 
-    ctx.load_script('https://raw.githubusercontent.com/lodash/lodash/refs/heads/main/dist/lodash.min.js')
+    ctx.load('https://raw.githubusercontent.com/lodash/lodash/refs/heads/main/dist/lodash.min.js')
 
     lodash = ctx['_']
     print(lodash)
@@ -19,7 +19,7 @@ def demo_offline():
     rt = JSRuntime()
     ctx: JSContext = rt.new_context()
 
-    ctx.load_script('node_modules/lodash/lodash.min.js')
+    ctx.load('node_modules/lodash/lodash.min.js')
 
     lodash = ctx['_']
     print(lodash)

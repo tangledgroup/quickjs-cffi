@@ -234,16 +234,16 @@ def build_quickjs_repo(*args, **kwargs):
     _source = '\n'.join(_quickjs_source)
     _inline_static_source = '\n'.join(_inline_static_source)
 
-    print('='* 80)
-    print(_inline_static_source)
-    print('='* 80)
+    # print('='* 80)
+    # print(_inline_static_source)
+    # print('='* 80)
 
     # function declarations for inlined definitions
     func_declarations: list[str] | str = get_func_declarations(_inline_static_source)
     func_declarations = '\n'.join(func_declarations)
-    print('-'* 80)
-    print(func_declarations)
-    print('-'* 80)
+    # print('-'* 80)
+    # print(func_declarations)
+    # print('-'* 80)
     _source += '\n\n' + func_declarations
 
     # extra source declarations
@@ -270,8 +270,8 @@ def build_quickjs_repo(*args, **kwargs):
     '''
 
     # print code
-    for i, line in enumerate(_source.splitlines()):
-        print(i + 1, ':', line)
+    # for i, line in enumerate(_source.splitlines()):
+    #     print(i + 1, ':', line)
 
     # build
     ffibuilder.cdef(_source)

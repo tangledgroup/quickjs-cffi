@@ -8,8 +8,7 @@ def demo_online():
     rt = JSRuntime()
     ctx: JSContext = rt.new_context()
 
-    script_url = 'https://cdnjs.cloudflare.com/ajax/libs/handlebars.js/4.7.8/handlebars.min.js'
-    ctx.load_script(script_url)
+    ctx.load('https://cdnjs.cloudflare.com/ajax/libs/handlebars.js/4.7.8/handlebars.min.js')
 
     Handlebars = ctx['Handlebars']
 
@@ -38,8 +37,7 @@ def demo_offline():
     rt = JSRuntime()
     ctx: JSContext = rt.new_context()
 
-    script_url = 'node_modules/handlebars/dist/handlebars.min.js'
-    ctx.load_script(script_url)
+    ctx.load('node_modules/handlebars/dist/handlebars.min.js')
 
     Handlebars = ctx['Handlebars']
 

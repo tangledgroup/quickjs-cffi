@@ -1,6 +1,22 @@
 # quickjs-cffi
 
-Python QuickJS CFFI
+<!--
+[![Build][build-image]]()
+[![Status][status-image]][pypi-project-url]
+[![Stable Version][stable-ver-image]][pypi-project-url]
+[![Coverage][coverage-image]]()
+[![Python][python-ver-image]][pypi-project-url]
+[![License][mit-image]][mit-url]
+-->
+[![PyPI](https://img.shields.io/pypi/v/quickjs-cffi)](https://pypi.org/project/quickjs-cffi/)
+[![Supported Versions](https://img.shields.io/pypi/pyversions/quickjs-cffi)](https://pypi.org/project/quickjs-cffi)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/quickjs-cffi)](https://pypistats.org/packages/quickjs-cffi)
+[![Github Downloads](https://img.shields.io/github/downloads/tangledgroup/quickjs-cffi/total.svg?label=Github%20Downloads)]()
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
+**Python** binding for [QuickJS Javascript Engine](https://bellard.org/quickjs/) using **cffi**. Supports **x86_64** and **aarch64** platforms.
+
+NOTE: Currently supported operating system is Linux (`manylinux_2_28` and `musllinux_1_2`)
 
 ## Build
 
@@ -8,8 +24,7 @@ Python QuickJS CFFI
 python -m venv venv
 source venv/bin/activate
 pip install poetry
-poetry install
-pip install tqdm
+poetry install --all-extras
 ```
 
 ## Demos

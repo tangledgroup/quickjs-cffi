@@ -8,7 +8,7 @@ def demo0():
     rt = JSRuntime()
     ctx: JSContext = rt.new_context()
 
-    ctx.load_script('examples/yjs.js')
+    ctx.load('examples/yjs.js')
 
     Y = ctx['Y']
     # print(Y)
@@ -28,7 +28,7 @@ def demo1():
     rt = JSRuntime()
     ctx: JSContext = rt.new_context()
 
-    ctx.load_script('examples/yjs.js')
+    ctx.load('examples/yjs.js')
 
     Y = ctx['Y']
     # print(Y)
@@ -50,7 +50,7 @@ def demo2():
     rt = JSRuntime()
     ctx: JSContext = rt.new_context()
 
-    ctx.load_script('examples/yjs.js')
+    ctx.load('examples/yjs.js')
 
     Y = ctx['Y']
     # print(Y)

@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "quickjs-cffi"
 version = "0.1.0"
-description = "Python binding for quickjs using cffi"
+description = "Python binding for QuickJS using CFFI"
 homepage = "https://github.com/tangledgroup/quickjs-cffi"
 repository = "https://github.com/tangledgroup/quickjs-cffi"
 authors = ["Marko Tasic <mtasic85@gmail.com>", "Tangled Group, Inc <info@tangledgroup.com>"]

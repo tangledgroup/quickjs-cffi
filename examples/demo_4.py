@@ -9,7 +9,7 @@ def demo4():
     ctx: JSContext = rt.new_context()
 
     script_url = 'https://raw.githubusercontent.com/lodash/lodash/refs/heads/main/dist/lodash.min.js'
-    ctx.load_script(script_url)
+    ctx.load(script_url)
 
     lodash = ctx['_']
     print(lodash, type(lodash))

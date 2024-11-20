@@ -605,11 +605,11 @@ class JSContext:
         return val
 
 
-    def load_script(self, path_or_url: str) -> Any:
+    def load(self, path_or_url: str, eval_flags: JSEval | int=JSEval.TYPE_GLOBAL) -> Any:
         path: str
         data: str
         path, data = read_script(path_or_url)
-        val: Any = self.eval(data, path)
+        val: Any = self.eval(data, path, eval_flags)
         return val
 
 
