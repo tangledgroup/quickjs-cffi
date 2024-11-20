@@ -293,7 +293,7 @@ def convert_pyvalue_to_jsvalue(_ctx: _JSContext_P, val: Any) -> _JSValue:
     else:
         raise ValueError(f'Unsupported Python value {type(val)}')
 
-    _c_temp.add(_val) # ???
+    # _c_temp.add(_val) # ???
     return _val
 
 
@@ -317,8 +317,7 @@ def _quikcjs_cffi_py_func_wrap(_ctx: _JSContext_P, _this_val: _JSValueConst, _ar
     ret = py_func(*pyargs)
     _ret = convert_pyvalue_to_jsvalue(_ctx, ret)
 
-    # _c_temp.discard(_val_p)
-    # print(f'{_c_temp = }')
+    _c_temp.discard(_val_p)
     return _ret
 
 
