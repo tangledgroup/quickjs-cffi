@@ -1,7 +1,7 @@
 import sys
 sys.path.append('..')
 
-from quickjs import JSRuntime, JSContext, JSError, JSEval
+from quickjs import JSRuntime, JSContext
 
 
 def demo_online():
@@ -29,4 +29,3 @@ def demo_offline():
 if __name__ == '__main__':
     demo_online()
     demo_offline()
-    # input('Press any key')

@@ -67,4 +67,3 @@ def demo_offline():
 if __name__ == '__main__':
     demo_online()
     demo_offline()
-    # input('Press any key')

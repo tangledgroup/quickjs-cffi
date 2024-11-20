@@ -165,3 +165,7 @@ cython_debug/
 
 wheelhouse/
 quickjs-repo/
+package.json
+package-lock.json
+node_modules/
+examples/*.js

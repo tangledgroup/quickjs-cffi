@@ -328,7 +328,7 @@ def download_file_to_tempfile(url: str) -> str:
             temp_file.write(response.read())
             temp_file.seek(0)
 
-        print(f'download_file_to_tempfile {temp_file.name=}')
+        # print(f'download_file_to_tempfile {temp_file.name=}')
         return temp_file.name
 
 
@@ -362,7 +362,7 @@ def _quikcjs_cffi_js_module_loader(_ctx: _JSContext_P, _module_name: _const_char
     module_name: bytes = ffi.string(_module_name)
     module_name: str = module_name.decode()
     is_remote_file: bool = module_name.startswith('http://') or module_name.startswith('https://')
-    print(f'_quikcjs_cffi_js_module_loader [0] {module_name=} {is_remote_file=}')
+    # print(f'_quikcjs_cffi_js_module_loader [0] {module_name=} {is_remote_file=}')
 
     path: str
     data: str
@@ -370,7 +370,7 @@ def _quikcjs_cffi_js_module_loader(_ctx: _JSContext_P, _module_name: _const_char
     _path: bytes = path.encode()
 
     _module_def: _JSModuleDef_P = lib.js_module_loader(_ctx, _path, _opaque)
-    print(f'_quikcjs_cffi_js_module_loader [1] {path=} {_module_def=}')
+    # print(f'_quikcjs_cffi_js_module_loader [1] {path=} {_module_def=}')
     return _module_def
 
 
@@ -597,8 +597,7 @@ class JSContext:
         _ctx = self._ctx
 
         _val: _JSValue = _JS_Eval(_ctx, buf, filename, eval_flags)
-        lib.js_std_dump_error(_ctx)
-
+        # lib.js_std_dump_error(_ctx)
 
         val: Any = convert_jsvalue_to_pyvalue(_ctx, _val)
 
