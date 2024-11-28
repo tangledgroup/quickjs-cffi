@@ -28,9 +28,11 @@ pip install quickjs-cffi
 
 <pre>
 ✅ Use **npm** to install packages and use them directly
-✅ In case you need to use complex **ECMAScript** or **TypeScript** modules/libraries/packages
-    see [Yjs](https://github.com/yjs/yjs) example below how to use [esbuild](https://esbuild.github.io/)
-    to transpile their code to [QuickJS](https://bellard.org/quickjs/) compatible ECMAScript modules
+✅ In case you need to use complex **ECMAScript** or **TypeScript**
+  modules/libraries/packages see [Yjs](https://github.com/yjs/yjs)
+  example below how to use [esbuild](https://esbuild.github.io/)
+  to transpile their code to [QuickJS](https://bellard.org/quickjs/)
+  compatible ECMAScript modules
 ✅ Import remote and local ECMAScript scripts/modules
 ✅ Define Python objects and pass them to JavaScript
 ✅ Define JavaScript objects and pass them to Python
