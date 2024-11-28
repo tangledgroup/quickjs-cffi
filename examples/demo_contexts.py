@@ -10,7 +10,8 @@ def demo():
 
     for i in tqdm(range(1_000)):
         ctx: JSContext = rt.new_context()
-        ctx.eval('var a = 1 + 1;')
+        a = ctx.eval(f'var a = {i} + 1; a')
+        print('Step', i, a)
 
 
 if __name__ == '__main__':

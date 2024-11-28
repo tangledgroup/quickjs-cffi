@@ -159,10 +159,18 @@ def build_quickjs_repo(*args, **kwargs):
 
     for i, line in enumerate(_source.splitlines()):
         if line.startswith('#'):
-            if 'quickjs-repo' in line:
-                is_quickjs_code = True
-            else:
+            # if 'quickjs-repo' in line:
+            #     is_quickjs_code = True
+            # else:
+            #     is_quickjs_code = False
+
+            line_items: list[str] = line.split(' ')
+            filename: str = line_items[2]
+
+            if filename.startswith('"/'):
                 is_quickjs_code = False
+            else:
+                is_quickjs_code = True
 
             continue
 

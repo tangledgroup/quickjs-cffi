@@ -3,6 +3,7 @@ __all__ = [
     'JSEval',
     'JSRuntime',
     'JSContext',
+    'JSValue',
     'JSError',
 ]
 
@@ -674,7 +675,10 @@ class JSString(JSValue):
     def __str__(self) -> str:
         _ctx = self._ctx
         _val = self._val
-        val: str = stringify_object(_ctx, _val)
+        _c_val: _char_p = lib._inline_JS_ToCStringLen(_ctx, ffi.NULL, _val)
+        val: bytes = ffi.string(_c_val)
+        val: str = val.decode()
+        # NOTE: _c_val is (probably) owned by QuickJS, so no need to free it
         return val
 
 

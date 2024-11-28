@@ -35,6 +35,10 @@ def demo1():
     val = ctx.eval('"aaa" + "bbb"')
     print(val, type(val))
 
+    val = ctx.eval('"aaa" + "bbb"')
+    val = str(val)
+    print(val, type(val))
+
     val = ctx.eval('JSON.stringify([1, 2.0, "3"])')
     print(val, type(val))
 
