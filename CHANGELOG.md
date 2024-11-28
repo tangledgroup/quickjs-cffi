@@ -3,6 +3,7 @@
 ## v0.1.3
 
 Changed:
+  - Improved README.
   - Improved build process.
 
 ## v0.1.2
